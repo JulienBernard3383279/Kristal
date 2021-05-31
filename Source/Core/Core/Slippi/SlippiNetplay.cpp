@@ -186,7 +186,7 @@ void appendToPacket(sf::Packet &packet,
 	// and now i.e this message's departure time to the packet
 	// The receiver will substract it from the computed ping
 
-	uint32_t departureDelayUs = std::lround((std::chrono::high_resolution_clock::now() - tp).count());
+	uint32_t departureDelayUs = std::lround((std::chrono::high_resolution_clock::now() - tp).count()/1000.);
 	aspac << departureDelayUs;
 
 	size_t aspacDataSize = aspac.getDataSize();
