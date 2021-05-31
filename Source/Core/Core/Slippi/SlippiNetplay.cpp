@@ -1062,6 +1062,8 @@ void SlippiNetplayClient::SendSlippiPad(std::unique_ptr<SlippiPad> pad)
 			appendToPacket(*cspac, outgoingAcksQueue.front());
 			outgoingAcksQueue.pop_front();
 		}
+
+		SendAsync(std::move(cspac));
 	}
 	else { SendAsync(std::move(spac)); }
 
