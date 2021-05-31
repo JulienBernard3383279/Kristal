@@ -176,6 +176,24 @@ u8 SlippiNetplayClient::LocalPlayerPort()
 	return this->playerIdx;
 }
 
+void appendToPacket(sf::Packet &packet,
+                    std::pair<std::chrono::high_resolution_clock::time_point, sf::Packet> outgoingAck)
+{
+	auto tp = outgoingAck.first;
+	auto aspac = outgoingAck.second;
+
+	// Add the time difference in microseconds between when the ack would've normally departed
+	// and now i.e this message's departure time to the packet
+	// The receiver will substract it from the computed ping
+
+	uint32_t departureDelayUs = std::lround((std::chrono::high_resolution_clock::now() - tp).count());
+	aspac << departureDelayUs;
+
+	size_t aspacDataSize = aspac.getDataSize();
+	packet << (u8)aspacDataSize;
+	packet.append(aspac.getData(), aspacDataSize);
+}
+
 // called from ---NETPLAY--- thread
 unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 {
@@ -319,13 +337,19 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		INFO_LOG(SLIPPI_ONLINE, "Building ack packet for frame %d (player %d) to peer at %d:%d", frame,
 		packetPlayerPort,
 		        peer->address.host, peer->address.port);
-		if (outgoingAcksQueue.size() < 5)
+
+		outgoingAcksQueue.push_back({std::chrono::high_resolution_clock::now(), spac});
+		if (outgoingAcksQueue.size() >= 5) // Flush the ack queue if size >= 5
 		{
-			outgoingAcksQueue.push_back({std::chrono::high_resolution_clock::now(), spac});
-		}
-		else // If the ack queue becomes to big, send ack messages again and log an error
-		{
-			ERROR_LOG(SLIPPI_ONLINE, "Ack packet for frame %d was forcefully sent", frame);
+			ERROR_LOG(SLIPPI_ONLINE, "Ack queue flushed");
+
+			sf::Packet cpac;
+			cpac << (MessageId)NP_MSG_SLIPPI_COMPOSITE;
+			for (auto outgoingAck : outgoingAcksQueue)
+			{
+				appendToPacket(cpac, outgoingAcksQueue.front());
+			}
+
 			ENetPacket *epac = enet_packet_create(spac.getData(), spac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
 			int sendResult = enet_peer_send(peer, 2, epac);
 		}
@@ -958,7 +982,7 @@ void SlippiNetplayClient::SendConnectionSelected()
 }
 
 void SlippiNetplayClient::SendSlippiPad(std::unique_ptr<SlippiPad> pad)
-{
+	{
 	auto status = slippiConnectStatus;
 	bool connectionFailed = status == SlippiNetplayClient::SlippiConnectStatus::NET_CONNECT_STATUS_FAILED;
 	bool connectionDisconnected = status == SlippiNetplayClient::SlippiConnectStatus::NET_CONNECT_STATUS_DISCONNECTED;
@@ -1034,20 +1058,7 @@ void SlippiNetplayClient::SendSlippiPad(std::unique_ptr<SlippiPad> pad)
 
 		for (int i = 0; i < std::min((int)outgoingAcksQueue.size(), 2); i++)
 		{
-			auto tp = outgoingAcksQueue.front().first;
-			auto aspac = outgoingAcksQueue.front().second;
-
-			// Add the time difference in microseconds between when the ack would've normally departed
-			// and now i.e this message's departure time to the packet
-			// The receiver will substract it from the computed ping
-
-			uint32_t departureDelayUs = std::lround((std::chrono::high_resolution_clock::now() - tp).count());
-			aspac << departureDelayUs;
-
-			size_t aspacDataSize = aspac.getDataSize();
-			*cspac << (u8)aspacDataSize;
-			cspac->append(aspac.getData(), aspacDataSize);
-
+			appendToPacket(*cspac, outgoingAcksQueue.front());
 			outgoingAcksQueue.pop_front();
 		}
 	}
