@@ -428,7 +428,7 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 	{
 		INFO_LOG(SLIPPI_ONLINE, "Received composite packet");
 		// [composite message type ID] ([length] [message type ID] rest of message)*
-		int index = 1;
+		size_t index = 1;
 		while (packet.getDataSize() > index)
 		{
 			size_t length = ((char*)packet.getData())[index];
