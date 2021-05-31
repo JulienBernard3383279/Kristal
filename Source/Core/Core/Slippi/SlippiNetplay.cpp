@@ -431,7 +431,7 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		size_t index = 1;
 		while (packet.getDataSize() > index)
 		{
-			size_t length = ((char*)packet.getData())[index];
+			size_t length = ((u8*)packet.getData())[index];
 			sf::Packet subPacket = sf::Packet();
 			subPacket.append((char *)packet.getData() + index, length);
 			OnData(subPacket, peer);
