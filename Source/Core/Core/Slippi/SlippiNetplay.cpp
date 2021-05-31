@@ -190,6 +190,7 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 	{
 	case NP_MSG_SLIPPI_PAD:
 	{
+		INFO_LOG(SLIPPI_ONLINE, "Received pad packet");
 		// Fetch current time immediately for the most accurate timing calculations
 		u64 curTime = Common::Timer::GetTimeUs();
 
@@ -315,9 +316,9 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		spac << (MessageId)NP_MSG_SLIPPI_PAD_ACK;
 		spac << frame;
 		spac << playerIdx;
-		// INFO_LOG(SLIPPI_ONLINE, "Sending ack packet for frame %d (player %d) to peer at %d:%d", frame,
-		// packetPlayerPort,
-		//         peer->address.host, peer->address.port);
+		INFO_LOG(SLIPPI_ONLINE, "Building ack packet for frame %d (player %d) to peer at %d:%d", frame,
+		packetPlayerPort,
+		        peer->address.host, peer->address.port);
 		outgoingAcksQueue.push_back({std::chrono::high_resolution_clock::now(), spac});
 
 		/*ENetPacket *epac = enet_packet_create(spac.getData(), spac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
@@ -327,6 +328,7 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 
 	case NP_MSG_SLIPPI_PAD_ACK:
 	{
+		INFO_LOG(SLIPPI_ONLINE, "Received ack packet");
 		std::lock_guard<std::mutex> lk(ack_mutex); // Trying to fix rare crash on ackTimers.count
 
 		// Store last frame acked
@@ -392,6 +394,7 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 
 	case NP_MSG_SLIPPI_COMPOSITE:
 	{
+		INFO_LOG(SLIPPI_ONLINE, "Received composite packet");
 		// [composite message type ID] ([length] [message type ID] rest of message)*
 		int index = 1;
 		while (packet.getDataSize() > index)
@@ -997,7 +1000,7 @@ void SlippiNetplayClient::SendSlippiPad(std::unique_ptr<SlippiPad> pad)
 	*spac << frame;
 	*spac << this->playerIdx;
 
-	// INFO_LOG(SLIPPI_ONLINE, "Sending a packet of inputs [%d]...", frame);
+	INFO_LOG(SLIPPI_ONLINE, "Sending a packet of inputs [%d]...", frame);
 	for (auto it = localPadQueue.begin(); it != localPadQueue.end(); ++it)
 	{
 		// INFO_LOG(SLIPPI_ONLINE, "Send [%d] -> %02X %02X %02X %02X %02X %02X %02X %02X", (*it)->frame,
@@ -1012,6 +1015,8 @@ void SlippiNetplayClient::SendSlippiPad(std::unique_ptr<SlippiPad> pad)
 
 	if (outgoingAcksQueue.size()>0)
 	{
+		INFO_LOG(SLIPPI_ONLINE,"Appending an ack to the pad message for frame %d", frame);
+
 		auto cspac = std::make_unique<sf::Packet>();
 
 		*cspac << static_cast<MessageId>(NP_MSG_SLIPPI_COMPOSITE);
