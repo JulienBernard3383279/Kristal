@@ -319,10 +319,15 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		INFO_LOG(SLIPPI_ONLINE, "Building ack packet for frame %d (player %d) to peer at %d:%d", frame,
 		packetPlayerPort,
 		        peer->address.host, peer->address.port);
-		outgoingAcksQueue.push_back({std::chrono::high_resolution_clock::now(), spac});
-
-		/*ENetPacket *epac = enet_packet_create(spac.getData(), spac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
-		int sendResult = enet_peer_send(peer, 2, epac);*/
+		if (frame > 8)
+		{
+			outgoingAcksQueue.push_back({std::chrono::high_resolution_clock::now(), spac});
+		}
+		else
+		{
+			ENetPacket *epac = enet_packet_create(spac.getData(), spac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
+			int sendResult = enet_peer_send(peer, 2, epac);
+		}
 	}
 	break;
 
