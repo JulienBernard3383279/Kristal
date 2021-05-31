@@ -319,12 +319,13 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		INFO_LOG(SLIPPI_ONLINE, "Building ack packet for frame %d (player %d) to peer at %d:%d", frame,
 		packetPlayerPort,
 		        peer->address.host, peer->address.port);
-		if (frame > 8)
+		if (outgoingAcksQueue.size() < 5)
 		{
 			outgoingAcksQueue.push_back({std::chrono::high_resolution_clock::now(), spac});
 		}
-		else
+		else // If the ack queue becomes to big, send ack messages again and log an error
 		{
+			ERROR_LOG(SLIPPI_ONLINE, "Ack packet for frame %d was forcefully sent", frame);
 			ENetPacket *epac = enet_packet_create(spac.getData(), spac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
 			int sendResult = enet_peer_send(peer, 2, epac);
 		}
