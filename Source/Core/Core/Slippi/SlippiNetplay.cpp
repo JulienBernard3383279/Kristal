@@ -361,7 +361,8 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		if (!(packet >> departureDelayUs))
 		{
 			ERROR_LOG(SLIPPI_ONLINE, "Got ack packet with missing departure delay for frame %d", frame);
-			break;
+			// Don't break, not an error - this is an ack due to outgoing ack queue overload
+			departureDelayUs = 0;
 		}
 
 		// INFO_LOG(SLIPPI_ONLINE, "Received ack packet from player %d(%d) [%d]...", packetPlayerPort, pIdx, frame);
