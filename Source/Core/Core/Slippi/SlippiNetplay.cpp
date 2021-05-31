@@ -349,6 +349,7 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 			{
 				appendToPacket(cpac, outgoingAcksQueue.front());
 			}
+			outgoingAcksQueue.clear();
 
 			ENetPacket *epac = enet_packet_create(spac.getData(), spac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
 			int sendResult = enet_peer_send(peer, 2, epac);
