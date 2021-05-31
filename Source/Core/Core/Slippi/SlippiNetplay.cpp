@@ -310,7 +310,7 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 			}
 		}
 
-		// Send Ack
+		// Construct Ack
 		sf::Packet spac;
 		spac << (MessageId)NP_MSG_SLIPPI_PAD_ACK;
 		spac << frame;
@@ -318,9 +318,10 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		// INFO_LOG(SLIPPI_ONLINE, "Sending ack packet for frame %d (player %d) to peer at %d:%d", frame,
 		// packetPlayerPort,
 		//         peer->address.host, peer->address.port);
+		outgoingAcksQueue.push_back({std::chrono::high_resolution_clock::now(), spac});
 
-		ENetPacket *epac = enet_packet_create(spac.getData(), spac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
-		int sendResult = enet_peer_send(peer, 2, epac);
+		/*ENetPacket *epac = enet_packet_create(spac.getData(), spac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
+		int sendResult = enet_peer_send(peer, 2, epac);*/
 	}
 	break;
 
@@ -348,6 +349,13 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 			break;
 		}
 
+		u32 departureDelayUs;
+		if (!(packet >> departureDelayUs))
+		{
+			ERROR_LOG(SLIPPI_ONLINE, "Got ack packet with missing departure delay for frame %d", frame);
+			break;
+		}
+
 		// INFO_LOG(SLIPPI_ONLINE, "Received ack packet from player %d(%d) [%d]...", packetPlayerPort, pIdx, frame);
 
 		lastFrameAcked[pIdx] = frame > lastFrameAcked[pIdx] ? frame : lastFrameAcked[pIdx];
@@ -367,7 +375,7 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		auto sendTime = ackTimers[pIdx].Front().timeUs;
 		ackTimers[pIdx].Pop();
 
-		pingUs[pIdx] = Common::Timer::GetTimeUs() - sendTime;
+		pingUs[pIdx] = Common::Timer::GetTimeUs() - sendTime - departureDelayUs;
 		if (g_ActiveConfig.bShowNetPlayPing && frame % SLIPPI_PING_DISPLAY_INTERVAL == 0 && pIdx == 0)
 		{
 			std::stringstream pingDisplay;
@@ -378,6 +386,21 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 			}
 			OSD::AddTypedMessage(OSD::MessageType::NetPlayPing, pingDisplay.str(), OSD::Duration::NORMAL,
 			                     OSD::Color::CYAN);
+		}
+	}
+	break;
+
+	case NP_MSG_SLIPPI_COMPOSITE:
+	{
+		// [composite message type ID] ([length] [message type ID] rest of message)*
+		int index = 1;
+		while (packet.getDataSize() > index)
+		{
+			int length = ((char*)packet.getData())[index];
+			index += length + 1;
+			sf::Packet subPacket = sf::Packet();
+			subPacket.append((char *)packet.getData() + index + 1, length);
+			OnData(subPacket, peer);
 		}
 	}
 	break;
@@ -984,7 +1007,39 @@ void SlippiNetplayClient::SendSlippiPad(std::unique_ptr<SlippiPad> pad)
 		spac->append((*it)->padBuf, SLIPPI_PAD_DATA_SIZE); // only transfer 8 bytes per pad
 	}
 
-	SendAsync(std::move(spac));
+	// If one more outgoing acks are waiting, make a composite packet
+	// Allow up to 2 ack packets in one departure so we can't permanently get in a situation where acks are lagging behind
+
+	if (outgoingAcksQueue.size()>0)
+	{
+		auto cspac = std::make_unique<sf::Packet>();
+
+		*cspac << static_cast<MessageId>(NP_MSG_SLIPPI_COMPOSITE);
+
+		size_t spacDataSize = spac->getDataSize();
+		*cspac << (u8)spacDataSize;
+		cspac->append(spac->getData(), spacDataSize);
+
+		for (int i = 0; i < std::min((int)outgoingAcksQueue.size(), 2); i++)
+		{
+			auto tp = outgoingAcksQueue.front().first;
+			auto aspac = outgoingAcksQueue.front().second;
+
+			// Add the time difference in microseconds between when the ack would've normally departed
+			// and now i.e this message's departure time to the packet
+			// The receiver will substract it from the computed ping
+
+			uint32_t departureDelayUs = std::lround((std::chrono::high_resolution_clock::now() - tp).count());
+			aspac << departureDelayUs;
+
+			size_t aspacDataSize = aspac.getDataSize();
+			*cspac << (u8)aspacDataSize;
+			cspac->append(aspac.getData(), aspacDataSize);
+
+			outgoingAcksQueue.pop_front();
+		}
+	}
+	else { SendAsync(std::move(spac)); }
 
 	u64 time = Common::Timer::GetTimeUs();
 
