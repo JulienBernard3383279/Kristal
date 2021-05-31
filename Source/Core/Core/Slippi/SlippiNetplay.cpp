@@ -956,6 +956,7 @@ void SlippiNetplayClient::StartSlippiGame()
 	hasGameStarted = false;
 
 	localPadQueue.clear();
+	outgoingAcksQueue.clear();
 
 	for (int i = 0; i < m_remotePlayerCount; i++)
 	{
