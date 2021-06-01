@@ -1057,7 +1057,8 @@ void SlippiNetplayClient::SendSlippiPad(std::unique_ptr<SlippiPad> pad)
 		*cspac << static_cast<MessageId>(NP_MSG_SLIPPI_COMPOSITE);
 
 		size_t spacDataSize = spac->getDataSize();
-		*cspac << (u8)spacDataSize;
+		*cspac << (u8)((spacDataSize & 0xFF00) >> 8);
+		*cspac << (u8)(spacDataSize & 0x00FF);
 		cspac->append(spac->getData(), spacDataSize);
 
 		for (int i = 0; i < std::min((int)outgoingAcksQueue.size(), 2); i++)
