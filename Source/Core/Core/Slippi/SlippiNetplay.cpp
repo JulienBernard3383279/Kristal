@@ -361,7 +361,6 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 
 	case NP_MSG_SLIPPI_PAD_ACK:
 	{
-		INFO_LOG(SLIPPI_ONLINE, "Received ack packet");
 		std::lock_guard<std::mutex> lk(ack_mutex); // Trying to fix rare crash on ackTimers.count
 
 		// Store last frame acked
@@ -371,6 +370,8 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 			ERROR_LOG(SLIPPI_ONLINE, "Ack packet too small to read frame");
 			break;
 		}
+		INFO_LOG(SLIPPI_ONLINE, "Received ack packet for frame %d", frame);
+
 		u8 packetPlayerPort;
 		if (!(packet >> packetPlayerPort))
 		{
@@ -1014,8 +1015,9 @@ void SlippiNetplayClient::SendSlippiPad(std::unique_ptr<SlippiPad> pad)
 		if (lastFrameAcked[i] < minAckFrame)
 			minAckFrame = lastFrameAcked[i];
 	}
-	// INFO_LOG(SLIPPI_ONLINE, "Checking to drop local inputs, oldest frame: %d | minAckFrame: %d | %d, %d, %d",
-	//         localPadQueue.back()->frame, minAckFrame, lastFrameAcked[0], lastFrameAcked[1], lastFrameAcked[2]);
+	INFO_LOG(SLIPPI_ONLINE, "Checking to drop local inputs, oldest frame: %d | minAckFrame: %d | %d, %d, %d",
+	         localPadQueue.back()->frame, minAckFrame, lastFrameAcked[0], lastFrameAcked[1], lastFrameAcked[2]);
+
 	while (!localPadQueue.empty() && localPadQueue.back()->frame < minAckFrame)
 	{
 		// INFO_LOG(SLIPPI_ONLINE, "Dropping local input for frame %d from queue", localPadQueue.back()->frame);
