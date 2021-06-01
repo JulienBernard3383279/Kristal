@@ -190,7 +190,9 @@ void appendToPacket(sf::Packet &packet,
 	aspac << departureDelayUs;
 
 	size_t aspacDataSize = aspac.getDataSize();
-	packet << (u16)aspacDataSize;
+
+	packet << (u8)((aspacDataSize & 0xFF00) >> 8);
+	packet << (u8)(aspacDataSize & 0x00FF);
 	packet.append(aspac.getData(), aspacDataSize);
 }
 
@@ -431,7 +433,7 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		size_t index = 1;
 		while (packet.getDataSize() > index)
 		{
-			size_t length = (size_t)((u8 *)packet.getData())[index] + (size_t)((u8 *)packet.getData())[index+1]*256;
+			size_t length = (size_t)(((u8 *)packet.getData())[index])<<8 + (size_t)(((u8 *)packet.getData())[index+1]);
 			sf::Packet subPacket = sf::Packet();
 			subPacket.append((char *)packet.getData() + index + 2, length);
 			OnData(subPacket, peer);
