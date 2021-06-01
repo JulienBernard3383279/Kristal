@@ -332,29 +332,31 @@ unsigned int SlippiNetplayClient::OnData(sf::Packet &packet, ENetPeer *peer)
 		}
 
 		// Construct Ack
-		sf::Packet spac;
-		spac << (MessageId)NP_MSG_SLIPPI_PAD_ACK;
-		spac << frame;
-		spac << playerIdx;
-		INFO_LOG(SLIPPI_ONLINE, "Building ack packet for frame %d (player %d) to peer at %d:%d", frame,
-		packetPlayerPort,
-		        peer->address.host, peer->address.port);
-
-		outgoingAcksQueue.push_back({std::chrono::high_resolution_clock::now(), spac});
-		if (outgoingAcksQueue.size() >= 5) // Flush the ack queue if size >= 5
+		if (hasGameStarted)
 		{
-			ERROR_LOG(SLIPPI_ONLINE, "Ack queue flushed");
+			sf::Packet spac;
+			spac << (MessageId)NP_MSG_SLIPPI_PAD_ACK;
+			spac << frame;
+			spac << playerIdx;
+			INFO_LOG(SLIPPI_ONLINE, "Building ack packet for frame %d (player %d) to peer at %d:%d", frame,
+			         packetPlayerPort, peer->address.host, peer->address.port);
 
-			sf::Packet cpac;
-			cpac << (MessageId)NP_MSG_SLIPPI_COMPOSITE;
-			for (auto outgoingAck : outgoingAcksQueue)
+			outgoingAcksQueue.push_back({std::chrono::high_resolution_clock::now(), spac});
+			if (outgoingAcksQueue.size() >= 5) // Flush the ack queue if size >= 5
 			{
-				appendToPacket(cpac, outgoingAcksQueue.front());
-			}
-			outgoingAcksQueue.clear();
+				ERROR_LOG(SLIPPI_ONLINE, "Ack queue flushed");
 
-			ENetPacket *epac = enet_packet_create(cpac.getData(), cpac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
-			int sendResult = enet_peer_send(peer, 2, epac);
+				sf::Packet cpac;
+				cpac << (MessageId)NP_MSG_SLIPPI_COMPOSITE;
+				for (auto outgoingAck : outgoingAcksQueue)
+				{
+					appendToPacket(cpac, outgoingAcksQueue.front());
+				}
+				outgoingAcksQueue.clear();
+
+				ENetPacket *epac = enet_packet_create(cpac.getData(), cpac.getDataSize(), ENET_PACKET_FLAG_UNSEQUENCED);
+				int sendResult = enet_peer_send(peer, 2, epac);
+			}
 		}
 	}
 	break;
@@ -975,6 +977,10 @@ void SlippiNetplayClient::StartSlippiGame()
 
 	// Reset match info for next game
 	matchInfo.Reset();
+}
+
+void EndSlippiGame() {
+
 }
 
 void SlippiNetplayClient::SendConnectionSelected()

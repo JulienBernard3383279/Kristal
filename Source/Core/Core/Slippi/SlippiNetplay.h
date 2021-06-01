@@ -131,6 +131,7 @@ class SlippiNetplayClient
 	SlippiConnectStatus GetSlippiConnectStatus();
 	std::vector<int> GetFailedConnections();
 	void StartSlippiGame();
+	void EndSlippiGame();
 	void SendConnectionSelected();
 	void SendSlippiPad(std::unique_ptr<SlippiPad> pad);
 	void SetMatchSelections(SlippiPlayerSelections &s);
