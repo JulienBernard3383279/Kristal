@@ -102,6 +102,14 @@ static void ScanThreadFunc()
 	{
 		if (libusb_hotplug_register_callback(s_libusb_context, (libusb_hotplug_event)(LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT), LIBUSB_HOTPLUG_ENUMERATE, 0x057e, 0x0337, LIBUSB_HOTPLUG_MATCH_ANY, HotplugCallback, nullptr, &s_hotplug_handle) != LIBUSB_SUCCESS)
 			s_libusb_hotplug_enabled = false;
+
+		if (libusb_hotplug_register_callback(
+		        s_libusb_context,
+		        (libusb_hotplug_event)(LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT),
+		        LIBUSB_HOTPLUG_ENUMERATE, 0x0079, 0x1846, LIBUSB_HOTPLUG_MATCH_ANY, HotplugCallback, nullptr,
+		        &s_hotplug_handle) != LIBUSB_SUCCESS)
+			s_libusb_hotplug_enabled = false;
+
 		if (s_libusb_hotplug_enabled)
 			NOTICE_LOG(SERIALINTERFACE, "Using libUSB hotplug detection");
 	}
@@ -210,7 +218,7 @@ static bool CheckDeviceAccess(libusb_device* device)
 		return false;
 	}
 
-	if (desc.idVendor == 0x057e && desc.idProduct == 0x0337)
+	if ((desc.idVendor == 0x057e && desc.idProduct == 0x0337) || (desc.idVendor == 0x0079 && desc.idProduct == 0x1846))
 	{
 		NOTICE_LOG(SERIALINTERFACE, "Found GC Adapter with Vendor: %X Product: %X Devnum: %d", desc.idVendor, desc.idProduct, 1);
 
