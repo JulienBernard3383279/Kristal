@@ -16,11 +16,14 @@ namespace Slippi {
   const uint8_t EVENT_POST_FRAME_UPDATE = 0x38;
   const uint8_t EVENT_GAME_END = 0x39;
   const uint8_t EVENT_FRAME_START = 0x3A;
+  const uint8_t EVENT_FRAME_END = 0x3C;
   const uint8_t EVENT_GECKO_LIST = 0x3D;
 
   const uint8_t GAME_INFO_HEADER_SIZE = 78;
   const uint8_t UCF_TOGGLE_SIZE = 8;
   const uint8_t NAMETAG_SIZE = 8;
+  const uint8_t DISPLAY_NAME_SIZE = 31;
+  const uint8_t CONNECT_CODE_SIZE = 10;
   const int32_t GAME_FIRST_FRAME = -123;
   const int32_t PLAYBACK_FIRST_SAVE = -122;
   const uint8_t GAME_SHEIK_INTERNAL_ID = 0x7;
@@ -79,6 +82,8 @@ namespace Slippi {
     uint8_t playerType;
     uint8_t controllerPort;
     std::array<uint16_t, NAMETAG_SIZE> nametag;
+    std::array<uint8_t, DISPLAY_NAME_SIZE> displayName;
+    std::array<uint8_t, CONNECT_CODE_SIZE> connectCode;
   } PlayerSettings;
 
   typedef struct {
@@ -89,6 +94,8 @@ namespace Slippi {
     std::unordered_map<uint8_t, PlayerSettings> players;
     uint8_t isPAL;
     uint8_t isFrozenPS;
+    uint8_t minorScene;
+    uint8_t majorScene;
     std::vector<uint8_t> geckoCodes;
   } GameSettings;
 
@@ -100,6 +107,7 @@ namespace Slippi {
     bool areSettingsLoaded = false;
 
     int32_t frameCount; // Current/last frame count
+    int32_t lastFinalizedFrame = -124;
 
     //From OnGameEnd event
     uint8_t winCondition;
@@ -122,11 +130,13 @@ namespace Slippi {
     bool AreSettingsLoaded();
     bool DoesFrameExist(int32_t frame);
     std::array<uint8_t, 4> GetVersion();
+    std::string GetVersionString();
     FrameData* GetFrame(int32_t frame);
     FrameData* GetFrameAt(uint32_t pos);
+    int32_t GetLastFinalizedFrame();
     int32_t GetLatestIndex();
     GameSettings* GetSettings();
-    uint8_t getGameEndMethod();
+    uint8_t GetGameEndMethod();
     bool DoesPlayerExist(int8_t port);
     bool IsProcessingComplete();
   private:

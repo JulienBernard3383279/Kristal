@@ -30,6 +30,8 @@ CMakeLists.txt.user
 # Ignore emacs temp files
 \#*\#
 .\#*
+# Ignore emacs etags code navigation
+TAGS
 # Ignore kdevelop files/dirs
 *.kdev4
 # Ignore IDEA/Clion files/dirs
@@ -40,6 +42,7 @@ SlippiLib.pdb
 SlippiLib.log
 SlippiLib.lib
 SlippiLib.idb
+SlippiLib.lib.recipe
 Externals/SlippiLib/CMakeCache.txt
 Externals/SlippiLib/CMakeFiles/
 Externals/SlippiLib/Makefile
@@ -72,10 +75,8 @@ semver.pdb
 semver.log
 
 AppDir/
-linuxdeploy
 linuxdeploy-update-plugin
 appimageupdatetool
-Tools/linuxdeploy
 Tools/linuxdeploy-update-plugin
 Tools/appimageupdatetool
 Tools/*.AppImage
@@ -84,3 +85,7 @@ Tools/*.zs-old
 *.AppImage
 *.zsync
 *.zs-old
+*.FileListAbsolute.txt
+*.recipe
+
+Data/Sys/GameFiles/GALE01/install.bat

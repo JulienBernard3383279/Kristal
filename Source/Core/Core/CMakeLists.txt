@@ -195,8 +195,11 @@ set(SRCS	ActionReplay.cpp
 			Slippi/SlippiPlayback.cpp
 			Slippi/SlippiReplayComm.cpp
 			Slippi/SlippiSavestate.cpp
+			Slippi/SlippiSpectate.cpp
 			Slippi/SlippiTimer.cpp
 			Slippi/SlippiUser.cpp
+			Slippi/SlippiGameReporter.cpp
+			Slippi/SlippiDirectCodes.cpp
 			)
 
 if(_M_X86)
@@ -267,9 +270,7 @@ if(LIBUSB_FOUND)
 	        	       	IPC_HLE/WII_IPC_HLE_Device_usb_bt_real.cpp)
 endif(LIBUSB_FOUND)
 
-if(NOT APPLE)
-	set(LIBS ${LIBS} videovulkan)
-endif()
+set(LIBS ${LIBS} videovulkan)
 
 set(LIBS ${LIBS} ${MBEDTLS_LIBRARIES})
 

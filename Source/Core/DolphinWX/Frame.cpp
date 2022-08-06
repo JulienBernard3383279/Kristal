@@ -30,6 +30,7 @@
 #include <wx/textctrl.h>
 #include <wx/thread.h>
 #include <wx/toolbar.h>
+#include <Core/Slippi/SlippiNetplay.h>
 
 #include "AudioCommon/AudioCommon.h"
 
@@ -72,7 +73,10 @@
 #include "VideoCommon/VideoConfig.h"
 
 #include "Core/Slippi/SlippiPlayback.h"
+#include "Core/Slippi/SlippiReplayComm.h"
+
 extern std::unique_ptr<SlippiPlaybackStatus> g_playbackStatus;
+extern std::unique_ptr<SlippiReplayComm> g_replayComm;
 
 #if defined(HAVE_X11) && HAVE_X11
 // X11Utils nastiness that's only used here
@@ -617,7 +621,11 @@ void CFrame::OnClose(wxCloseEvent &event)
 		m_LogWindow->RemoveAllListeners();
 
 	// Uninit
-	m_Mgr->UnInit();
+    // As of wxWidgets 3.1.4, this is called automatically - and calling
+    // it here can lead to a doubling of shutdown conditions, which leads
+    // to a "crash" on close on some systems.
+    //
+	// m_Mgr->UnInit();
 }
 
 // Post events
@@ -697,6 +705,13 @@ void CFrame::UpdateTitle(const std::string &str)
 	if (SConfig::GetInstance().bRenderToMain && SConfig::GetInstance().m_InterfaceStatusbar)
 	{
 		GetStatusBar()->SetStatusText(str, 0);
+
+		if (g_replayComm->getSettings().gameStation != "") {
+			std::string titleStr = StringFromFormat("%s | %s", scm_rev_str.c_str(), g_replayComm->getSettings().gameStation.c_str());
+			m_RenderFrame->SetTitle(titleStr);
+			return;
+		}
+		
 		m_RenderFrame->SetTitle(scm_rev_str);
 	}
 	else
@@ -1448,7 +1463,7 @@ void CFrame::ParseHotkeys()
 		g_Config.bDisableFog = !g_Config.bDisableFog;
 	}
 	Core::SetIsThrottlerTempDisabled(IsHotkey(HK_TOGGLE_THROTTLE, true));
-	if (IsHotkey(HK_DECREASE_EMULATION_SPEED))
+	if (IsHotkey(HK_DECREASE_EMULATION_SPEED) && !IsOnline())
 	{
 		OSDChoice = 5;
 
@@ -1462,7 +1477,7 @@ void CFrame::ParseHotkeys()
 		if (SConfig::GetInstance().m_EmulationSpeed >= 0.95f && SConfig::GetInstance().m_EmulationSpeed <= 1.05f)
 			SConfig::GetInstance().m_EmulationSpeed = 1.0f;
 	}
-	if (IsHotkey(HK_INCREASE_EMULATION_SPEED))
+	if (IsHotkey(HK_INCREASE_EMULATION_SPEED) && !IsOnline())
 	{
 		OSDChoice = 5;
 
@@ -1617,7 +1632,14 @@ void CFrame::ParseHotkeys()
 		State::UndoSaveState();
 #ifdef IS_PLAYBACK
 	// Slippi replay hotkeys and setup
-	if (SConfig::GetInstance().m_InterfaceSeekbar && g_playbackStatus && g_playbackStatus->inSlippiPlayback)
+	if (IsHotkey(HK_HIDE_SEEKBAR))
+	{
+		if (SConfig::GetInstance().m_CLIHideSeekbar)
+			SConfig::GetInstance().m_CLIHideSeekbar = false;
+		SConfig::GetInstance().m_InterfaceSeekbar = !SConfig::GetInstance().m_InterfaceSeekbar;
+	}	
+	if (SConfig::GetInstance().m_InterfaceSeekbar && !SConfig::GetInstance().m_CLIHideSeekbar && g_playbackStatus &&
+	    g_playbackStatus->inSlippiPlayback)
 	{		
 		if (IsHotkey(HK_JUMP_BACK))
 			g_playbackStatus->shouldJumpBack = true;
@@ -1633,7 +1655,7 @@ void CFrame::ParseHotkeys()
 			m_slippi_timer = std::make_unique<SlippiTimer>(this, seekBar, seekBarText);
 			m_slippi_timer->Start(50); 
 		}
-	} 
+	}
 	else if (m_Mgr->GetPane(_("Slippi Pane")).IsShown())
 	{
 		m_Mgr->GetPane(_("Slippi Pane")).Hide();

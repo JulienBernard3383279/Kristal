@@ -25,6 +25,10 @@
 #include <sys/ioctl.h>
 #include <linux/ashmem.h>
 #endif
+
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 #endif
 
 #ifdef ANDROID
@@ -131,6 +135,24 @@ void MemArena::ReleaseView(void* view, size_t size)
 
 u8* MemArena::FindMemoryBase()
 {
+    // This code was originally introduced to enable running under Rosetta 2 for M1 devices.
+    // However, it turns out it works fine for x64_64 macOS and helps slightly with the 2GB issue
+    // by looking to base in a way that works for the OS itself.
+#if defined(__APPLE__)
+	const size_t memory_size = 0x400000000;
+	const int flags = MAP_ANON | MAP_PRIVATE;
+
+	void* base = mmap(nullptr, memory_size, PROT_NONE, flags, -1, 0);
+	if (base == MAP_FAILED)
+	{
+		PanicAlert("Failed to map enough memory space: %s", strerror(errno));
+		return nullptr;
+	}
+
+	munmap(base, memory_size);
+	return static_cast<u8*>(base);
+#endif
+
 #if _ARCH_64
 #ifdef _WIN32
 	// 64 bit

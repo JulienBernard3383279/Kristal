@@ -48,6 +48,7 @@ enum
 	D_THEMES_IDX,
 	D_PIPES_IDX,
 	D_MEMORYWATCHER_IDX,
+	D_SLIPPI_IDX,
 	F_DOLPHINCONFIG_IDX,
 	F_DEBUGGERCONFIG_IDX,
 	F_LOGGERCONFIG_IDX,
@@ -150,11 +151,15 @@ void SetUserPath(unsigned int dir_index, const std::string& path);
 // probably doesn't belong here
 std::string GetThemeDir(const std::string& theme_name);
 
+// Gets the path where a Slippi user.json file lives.
+std::string GetSlippiUserJSONPath();
+
 // Returns the path to where the sys file are
 std::string GetSysDirectory();
 
 #ifdef __APPLE__
 std::string GetBundleDirectory();
+std::string GetApplicationSupportDirectory();
 #endif
 
 std::string& GetExeDirectory();

@@ -19,13 +19,11 @@ GCAdapterConfigDiag::GCAdapterConfigDiag(wxWindow* const parent, const wxString&
 	const int tab_num)
 	: wxDialog(parent, wxID_ANY, name), m_pad_id(tab_num)
 {
+	GCAdapter::ResetAdapterIfNecessary();
+
 	wxCheckBox* const gamecube_rumble = new wxCheckBox(this, wxID_ANY, _("Rumble"));
 	gamecube_rumble->SetValue(SConfig::GetInstance().m_AdapterRumble[m_pad_id]);
 	gamecube_rumble->Bind(wxEVT_CHECKBOX, &GCAdapterConfigDiag::OnAdapterRumble, this);
-
-	wxCheckBox* const gamecube_konga = new wxCheckBox(this, wxID_ANY, _("Simulate DK Bongos"));
-	gamecube_konga->SetValue(SConfig::GetInstance().m_AdapterKonga[m_pad_id]);
-	gamecube_konga->Bind(wxEVT_CHECKBOX, &GCAdapterConfigDiag::OnAdapterKonga, this);
 
 	m_adapter_status = new wxStaticText(this, wxID_ANY, _("Adapter Not Detected"));
 
@@ -49,7 +47,6 @@ GCAdapterConfigDiag::GCAdapterConfigDiag(wxWindow* const parent, const wxString&
 	szr->Add(m_adapter_status, 0, wxEXPAND);
 	szr->AddSpacer(space5);
 	szr->Add(gamecube_rumble, 0, wxEXPAND);
-	szr->Add(gamecube_konga, 0, wxEXPAND);
 	szr->AddSpacer(space5);
 	szr->Add(CreateButtonSizer(wxCLOSE | wxNO_DEFAULT), 0, wxEXPAND | wxLEFT | wxRIGHT, space5);
 	szr->AddSpacer(space5);
@@ -90,11 +87,6 @@ void GCAdapterConfigDiag::OnUpdateAdapter(wxCommandEvent& WXUNUSED(event))
 void GCAdapterConfigDiag::OnAdapterRumble(wxCommandEvent& event)
 {
 	SConfig::GetInstance().m_AdapterRumble[m_pad_id] = event.IsChecked();
-}
-
-void GCAdapterConfigDiag::OnAdapterKonga(wxCommandEvent& event)
-{
-	SConfig::GetInstance().m_AdapterKonga[m_pad_id] = event.IsChecked();
 }
 
 void GCAdapterConfigDiag::OnUpdateRate(wxTimerEvent& ev) 

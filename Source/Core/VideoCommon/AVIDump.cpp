@@ -64,7 +64,9 @@ static void InitAVCodec()
 	static bool first_run = true;
 	if (first_run)
 	{
+#if LIBAVCODEC_VERSION_MICRO >= 100 && LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 9, 100)
 		av_register_all();
+#endif
 		avformat_network_init();
 		first_run = false;
 	}
@@ -84,6 +86,13 @@ static bool AVStreamCopyContext(AVStream* stream, AVCodecContext* codec_context)
 
 bool AVIDump::Start(int w, int h, bool fromBGRA)
 {
+#ifdef IS_PLAYBACK
+	if (!g_playbackStatus || !g_playbackStatus->inSlippiPlayback ||
+	    (g_playbackStatus->isHardFFW || g_playbackStatus->isSoftFFW) ||
+	    g_replayComm->current.startFrame >= g_playbackStatus->currentPlaybackFrame ||
+	    g_replayComm->current.endFrame <= g_playbackStatus->currentPlaybackFrame)
+		return false;
+#endif
 	s_pix_fmt = fromBGRA ? AV_PIX_FMT_BGRA : AV_PIX_FMT_RGBA;
 
 	s_width = w;
@@ -107,13 +116,19 @@ static std::string GetDumpPath(const std::string& format)
 	if (!g_Config.sDumpPath.empty())
 		return g_Config.sDumpPath;
 
+	std::string s_dump_directory;
 	std::string s_dump_path;
 
+	if (!SConfig::GetInstance().m_strOutputDirectory.empty())
+		s_dump_directory = SConfig::GetInstance().m_strOutputDirectory;
+	else
+		s_dump_directory = File::GetUserPath(D_DUMPFRAMES_IDX);
+
 	if (!SConfig::GetInstance().m_strOutputFilenameBase.empty())
-		s_dump_path = File::GetUserPath(D_DUMPFRAMES_IDX) + 
+		s_dump_path = s_dump_directory +
 			SConfig::GetInstance().m_strOutputFilenameBase + "." + format;
 	else
-		s_dump_path = File::GetUserPath(D_DUMPFRAMES_IDX) + "framedump" +
+		s_dump_path = s_dump_directory + "framedump" +
 			std::to_string(s_file_index) + "." + format;
 
 	// Ask to delete file
@@ -145,7 +160,7 @@ bool AVIDump::CreateVideoFile()
 
 	File::CreateFullPath(s_dump_path);
 
-	AVOutputFormat* output_format = av_guess_format(s_format.c_str(), s_dump_path.c_str(), nullptr);
+	auto* output_format = av_guess_format(s_format.c_str(), s_dump_path.c_str(), nullptr);
 	if (!output_format)
 	{
 		ERROR_LOG(VIDEO, "Invalid format %s", s_format.c_str());
@@ -225,16 +240,16 @@ bool AVIDump::CreateVideoFile()
 		return false;
 	}
 
-	NOTICE_LOG(VIDEO, "Opening file %s for dumping", s_format_context->filename);
-	if (avio_open(&s_format_context->pb, s_format_context->filename, AVIO_FLAG_WRITE) < 0 ||
+	NOTICE_LOG(VIDEO, "Opening file %s for dumping", s_dump_path.c_str());
+	if (avio_open(&s_format_context->pb, s_dump_path.c_str(), AVIO_FLAG_WRITE) < 0 ||
 		avformat_write_header(s_format_context, nullptr))
 	{
-		ERROR_LOG(VIDEO, "Could not open %s", s_format_context->filename);
+		ERROR_LOG(VIDEO, "Could not open %s", s_dump_path.c_str());
 		return false;
 	}
 
-	OSD::AddMessage(StringFromFormat("Dumping Frames to \"%s\" (%dx%d)", s_format_context->filename,
-		s_width, s_height));
+	OSD::AddMessage(
+		StringFromFormat("Dumping Frames to \"%s\" (%dx%d)", s_dump_path.c_str(), s_width, s_height));
 
 	return true;
 }
@@ -299,10 +314,10 @@ static void WritePacket(AVPacket& pkt)
 void AVIDump::AddFrame(const u8* data, int width, int height, int stride, const Frame& state)
 {
 #ifdef IS_PLAYBACK
-	if (!g_playbackStatus && !g_playbackStatus->inSlippiPlayback &&
-		(g_playbackStatus->isHardFFW || g_playbackStatus->isSoftFFW) &&
-		g_replayComm->current.startFrame > g_playbackStatus->currentPlaybackFrame &&
-		g_replayComm->current.endFrame < g_playbackStatus->currentPlaybackFrame)
+	if (!g_playbackStatus || !g_playbackStatus->inSlippiPlayback ||
+	    (g_playbackStatus->isHardFFW || g_playbackStatus->isSoftFFW) ||
+	    g_replayComm->current.startFrame >= g_playbackStatus->currentPlaybackFrame ||
+	    g_replayComm->current.endFrame <= g_playbackStatus->currentPlaybackFrame)
 		return;
 #endif
 	// Assume that the timing is valid, if the savestate id of the new frame

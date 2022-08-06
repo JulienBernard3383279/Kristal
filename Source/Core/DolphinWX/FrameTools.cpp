@@ -270,6 +270,25 @@ void CFrame::OpenGeneralConfiguration(wxWindowID tab_id)
 	m_main_config_dialog->SetFocus();
 }
 
+// Only macOS has WebView support.
+#ifdef __APPLE__
+// Actually create and show the wxWebView control.
+void CFrame::ShowSlippiAuthenticationDialog()
+{
+    m_slippi_auth_dialog = new SlippiAuthWebView(this);
+    m_slippi_auth_dialog->Show();
+    m_slippi_auth_dialog->SetFocus();
+}
+
+// This is the entry point for our webview dialog. `CallAfter` is used
+// as the call could come from a background thread, and `wxWebView` needs to
+// be instantiated on the main thread, which this does.
+void CFrame::OpenSlippiAuthenticationDialog()
+{
+    CallAfter(&CFrame::ShowSlippiAuthenticationDialog);
+}
+#endif
+
 // Menu items
 
 // Start the game or change the disc.
@@ -1687,6 +1706,8 @@ void CFrame::OnToggleStatusbar(wxCommandEvent& event)
 
 void CFrame::OnToggleSeekbar(wxCommandEvent &event)
 {
+	if (SConfig::GetInstance().m_CLIHideSeekbar)
+		SConfig::GetInstance().m_CLIHideSeekbar = false;
 	SConfig::GetInstance().m_InterfaceSeekbar = event.IsChecked();
 
 	SendSizeEvent();

@@ -19,6 +19,8 @@ class SlippiUser
 		std::string connectCode = "";
 		std::string latestVersion = "";
 		std::string fileContents = "";
+
+		int port;
 	};
 
 	SlippiUser();
@@ -26,7 +28,7 @@ class SlippiUser
 
 	bool AttemptLogin();
 	void OpenLogInPage();
-	void UpdateApp();
+	bool UpdateApp();
 	void ListenForLogIn();
 	void LogOut();
 	void OverwriteLatestVersion(std::string version);
@@ -35,7 +37,6 @@ class SlippiUser
 	void FileListenThread();
 
   protected:
-	std::string getUserFilePath();
 	UserInfo parseFile(std::string fileContents);
 	void deleteFile();
 	void overwriteFromServer();

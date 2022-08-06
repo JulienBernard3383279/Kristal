@@ -53,7 +53,9 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux" AND NOT ANDROID)
 endif()
 
 if(APPLE)
-	option(OSX_USE_DEFAULT_SEARCH_PATH "Don't prioritize system library paths" OFF)
+	option(MACOS_USE_DEFAULT_SEARCH_PATH "Don't prioritize system library paths" OFF)
+	option(MACOS_CODE_SIGNING "Enable codesigning" OFF)
+	set(MACOS_CODE_SIGNING_IDENTITY "The identity used for codesigning." CACHE STRING "")
 	set(CMAKE_FIND_FRAMEWORK LAST)
 	set(CMAKE_FIND_APPBUNDLE LAST)
 endif()
@@ -284,7 +286,7 @@ if(ENABLE_LTO)
 endif()
 
 if(APPLE)
-	if(NOT OSX_USE_DEFAULT_SEARCH_PATH)
+	if(NOT MACOS_USE_DEFAULT_SEARCH_PATH)
 		# Hack up the path to prioritize the path to built-in OS libraries to
 		# increase the chance of not depending on a bunch of copies of them
 		# installed by MacPorts, Fink, Homebrew, etc, and ending up copying
@@ -303,8 +305,9 @@ if(APPLE)
 	# This is inserted into the Info.plist as well.
 	# Note that the SDK determines the maximum version of which optional
 	# features can be used, not the minimum required version to run.
-	set(OSX_MIN_VERSION "10.9")
+	set(OSX_MIN_VERSION "10.13")
 	set(CMAKE_OSX_SYSROOT "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.14.sdk")
+	set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13")
 	set(TARGET_FLAGS "${TARGET_FLAGS} -mmacosx-version-min=${OSX_MIN_VERSION}")
 	# Do not warn about frameworks that are not available on all architectures.
 	# This avoids a warning when linking with QuickTime.
@@ -323,7 +326,7 @@ if(APPLE)
 	# Reserve the minimum size for the zero page.
 	# Our JIT requires virtual memory space below 2GB, while the default zero
 	# page on x86_64 is 4GB in size.
-	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-pagezero_size,0x1000")
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-segalign,0x1000,-pagezero_size,0x1000")
 
 	find_library(APPKIT_LIBRARY AppKit)
 	find_library(APPSERV_LIBRARY ApplicationServices)
@@ -670,6 +673,8 @@ endif()
 #   - place the CMakeLists.txt in the first-level subdirectory, e.g.
 #     Externals/zlib/CMakeLists.txt (that is: NOT in some Src/ subdirectory)
 #
+include_directories(Externals/base64)
+
 add_subdirectory(Externals/Bochs_disasm)
 include_directories(Externals/Bochs_disasm)
 
@@ -926,7 +931,13 @@ endif()
 
 if(NOT DISABLE_WX)
 	include(FindwxWidgets OPTIONAL)
-	FIND_PACKAGE(wxWidgets COMPONENTS core aui adv)
+
+	# This is increasingly not touched, but the clarity is probably beneficial to keep around.
+	if(APPLE)
+		FIND_PACKAGE(wxWidgets COMPONENTS core aui adv webview)
+	else()
+		FIND_PACKAGE(wxWidgets COMPONENTS core aui adv)
+	endif()
 
 	if(_ARCH_32)
 		add_definitions(-DwxSIZE_T_IS_UINT)
@@ -960,14 +971,14 @@ if(NOT DISABLE_WX)
 			ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
 		if(${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}.${CMAKE_PATCH_VERSION}
 				VERSION_EQUAL 2.8.2 OR "${DIST_NAME}" STREQUAL "natty")
-			check_lib(GTK2 gtk+-2.0 gtk+-2.0 gtk.h REQUIRED)
+			check_lib(GTK2 gtk+-3.0 gtk+-3.0 gtk.h REQUIRED)
 		else()
-			include(FindGTK2)
-			if(GTK2_FOUND)
-				include_directories(${GTK2_INCLUDE_DIRS})
-				list(APPEND LIBS ${GTK2_LIBRARIES})
+			include(FindGTK3)
+			if(GTK3_FOUND)
+				include_directories(${GTK3_INCLUDE_DIRS})
+				list(APPEND LIBS ${GTK3_LIBRARIES})
 			else()
-				message(FATAL_ERROR "GTK is required to build the WX UI. Please install the GTK development libraries.")
+				message(FATAL_ERROR "GTK3 is required to build the WX UI. Please install the GTK3 development libraries.")
 			endif()
 		endif()
 	endif()

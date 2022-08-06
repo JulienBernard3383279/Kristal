@@ -497,16 +497,13 @@ void Renderer::DrawDebugText()
 			"\n"
 			"Your GameCube Controller Adapter is reading inputs at a reduced rate.\n"
 			"You can still play normally but you will experience higher input lag.\n"
-			"This indicates a potential hardware or driver issue.\n"
+			"This indicates a potential hardware issue.\n"
 			"\n"
-			"If you're using a computer with an AMD Ryzen processor:\n"
-			"Try connecting the black plug of your adapter to a USB 3.0/3.1 Gen 1 port on your motherboard.\n"
-			"These ports are usually blue or say \"SS\" (SuperSpeed). USB 3.2 (light blue) or USB 2.0 (black) will NOT work.\n"
+			"Go to the Dolphin -> Controllers page, click 'Configure' next to your controller's port, the check what your pollrate is."
 			"\n"
-			"The recommended driver on Windows is WinUSB. If you're using another driver in Zadig try switching to WinUSB.\n"
+			"If it is considerably lower than 125 hz, keep trying different USB ports until it is around 125 hz."
 			"\n"
-			"You can turn this message off by going to \"Config\" and then \"Advanced\".\n"
-			"Under \"Troubleshooting\", uncheck \"Show a message when inputs are being read at a reduced rate\".";	
+			"For more help, please ask in the official Slippi Discord server.";
 	}
 	
 	// and then the text
@@ -988,10 +985,12 @@ void Renderer::RunFrameDumps()
 					frame_dump_started = StartFrameDumpToAVI(config);
 				else
 					frame_dump_started = StartFrameDumpToImage(config);
-
+// just keep retrying if this is a playback build
+#ifndef IS_PLAYBACK
 				// Stop frame dumping if we fail to start.
 				if (!frame_dump_started)
 					SConfig::GetInstance().m_DumpFrames = false;
+#endif
 			}
 
 			// If we failed to start frame dumping, don't write a frame.

@@ -169,7 +169,9 @@ void SlippiReplayComm::loadFile()
 		commFileSettings.commandId = "";
 		commFileSettings.outputOverlayFiles = false;
 		commFileSettings.isRealTimeMode = false;
+		commFileSettings.shouldResync = true;
 		commFileSettings.rollbackDisplayMethod = "off";
+		commFileSettings.gameStation = "";
 
 		if (res.is_string())
 		{
@@ -199,13 +201,16 @@ void SlippiReplayComm::loadFile()
 	commFileSettings.commandId = res.value("commandId", "");
 	commFileSettings.outputOverlayFiles = res.value("outputOverlayFiles", false);
 	commFileSettings.isRealTimeMode = res.value("isRealTimeMode", false);
+	commFileSettings.shouldResync = res.value("shouldResync", true);
 	commFileSettings.rollbackDisplayMethod = res.value("rollbackDisplayMethod", "off");
+	commFileSettings.gameStation = res.value("gameStation", "");
 
 	if (commFileSettings.mode == "queue")
 	{
 		auto queue = res["queue"];
 		if (queue.is_array())
 		{
+			std::queue<WatchSettings>().swap(commFileSettings.queue);
 			int index = 0;
 			for (json::iterator it = queue.begin(); it != queue.end(); ++it)
 			{
