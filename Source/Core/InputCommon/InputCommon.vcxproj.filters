@@ -58,8 +58,6 @@
     <ClInclude Include="ControllerEmu.h" />
     <ClInclude Include="GCPadStatus.h" />
     <ClInclude Include="InputConfig.h" />
-    <ClCompile Include="InputStabilizer.h" />
-    <ClCompile Include="LibusbUtils.h" />
     <ClInclude Include="ControllerInterface\DInput\DInput.h">
       <Filter>ControllerInterface\DInput</Filter>
     </ClInclude>
@@ -94,6 +92,8 @@
       <Filter>ControllerInterface\DInput</Filter>
     </ClInclude>
     <ClInclude Include="GCAdapter.h" />
+    <ClInclude Include="InputStabilizer.h" />
+    <ClInclude Include="LibusbUtils.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="CMakeLists.txt" />

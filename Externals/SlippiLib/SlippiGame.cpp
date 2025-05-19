@@ -176,7 +176,7 @@ namespace Slippi {
 
     // Add frame to game. The frames are stored in multiple ways because
     // for games with rollback, the same frame may be replayed multiple times
-    frame->numSinceStart = game->frames.size();
+    frame->numSinceStart = (uint32_t)game->frames.size();
     game->frames.push_back(std::move(frameUniquePtr));
     game->framesByIndex[frameCount] = frame;
   }
@@ -246,7 +246,7 @@ namespace Slippi {
 
     // Add frame to game
     if (isNewFrame) {
-      frame->numSinceStart = game->frames.size();
+      frame->numSinceStart = (uint32_t)game->frames.size();
       game->frames.push_back(std::move(frameUniquePtr));
       game->framesByIndex[frameCount] = frame;
     }
@@ -474,7 +474,7 @@ namespace Slippi {
           // Transform this message into a different message
           command = data[SPLIT_MESSAGE_INTERNAL_DATA_LEN + 2];
           data = &splitMessageBuf[0];
-          payloadSize = splitMessageBuf.size();
+          payloadSize = (uint32_t)splitMessageBuf.size();
           shouldResetSplitMessageBuf = true;
         }
       }

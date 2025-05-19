@@ -2007,6 +2007,10 @@
     <ClInclude Include="..\..\include\wx\generic\private\widthcalc.h">
       <Filter>Headers\Generic\private</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\wx\msw\ole\comimpl.h" />
+    <ClInclude Include="..\..\include\wx\msw\WebView2.h" />
+    <ClInclude Include="..\..\includes\wx\msw\WebView2EnvironmentOptions.h" />
+    <ClInclude Include="..\..\include\wx\msw\webview_edge.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\aui\auibar.cpp">
@@ -2211,9 +2215,6 @@
       <Filter>Common</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\common\dummy.cpp">
-      <Filter>Common</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\common\dynarray.cpp">
       <Filter>Common</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\common\dynlib.cpp">
@@ -3278,9 +3279,6 @@
     <ClCompile Include="..\..\src\msw\palette.cpp">
       <Filter>MSW</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\msw\panel.cpp">
-      <Filter>MSW</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\msw\pen.cpp">
       <Filter>MSW</Filter>
     </ClCompile>
@@ -3497,6 +3495,9 @@
     <ClCompile Include="..\..\src\msw\taskbarbutton.cpp">
       <Filter>MSW</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\msw\customdraw.cpp" />
+    <ClCompile Include="..\..\src\msw\ole\comimpl.cpp" />
+    <ClCompile Include="..\..\src\msw\webview_edge.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\src\common\unictabl.inc">
