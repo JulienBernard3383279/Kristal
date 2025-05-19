@@ -3,7 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "Common/Common.h"
-#include "Common/scmrev.h"
+//#include "Common/scmrev.h"
 
 #ifdef _DEBUG
 #define BUILD_TYPE_STR "Debug "
@@ -46,8 +46,8 @@ const std::string netplay_dolphin_ver = "Slippi-" SLIPPI_REV_STR " Mac";
 const std::string netplay_dolphin_ver = "Slippi-" SLIPPI_REV_STR " Lin";
 #endif
 
-const std::string scm_rev_git_str = SCM_REV_STR;
+const std::string scm_rev_git_str = "[Git rev]";
 const std::string scm_rev_cache_str = "201705092203";
-const std::string scm_desc_str = SCM_DESC_STR;
-const std::string scm_branch_str = SCM_BRANCH_STR;
-const std::string scm_distributor_str = SCM_DISTRIBUTOR_STR;
+const std::string scm_desc_str = "[Desc]";
+const std::string scm_branch_str = "[Branch]";
+const std::string scm_distributor_str = "[Distributor]";
