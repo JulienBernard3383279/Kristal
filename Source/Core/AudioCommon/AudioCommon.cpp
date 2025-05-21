@@ -47,7 +47,7 @@ void InitSoundStream(void *hWnd)
 	else if (backend == BACKEND_DIRECTSOUND && DSound::isValid())
 		g_sound_stream = std::make_unique<DSound>(hWnd);
 	else if (backend == BACKEND_SHARED_WASAPI && WASAPIStream::isValid())
-		g_sound_stream = std::make_unique<WASAPIStream>(false, "");
+		g_sound_stream = std::make_unique<WASAPIStream>(false, "default");
 	else if (backend.find(BACKEND_EXCLUSIVE_WASAPI) != std::string::npos && WASAPIStream::isValid())
 		g_sound_stream = std::make_unique<WASAPIStream>(
 		    true, backend.substr((BACKEND_EXCLUSIVE_WASAPI + std::string(" on ")).size(), std::string::npos));
@@ -135,8 +135,8 @@ std::vector<std::string> GetSoundBackends()
 		backends.push_back(BACKEND_OPENSLES);
 	if (WASAPIStream::isValid())
 	{
-		// backends.push_back(BACKEND_SHARED_WASAPI);
-		// disable shared-mode for now, not working correctly
+		backends.push_back(BACKEND_SHARED_WASAPI);
+
 		backends.push_back(std::string(BACKEND_EXCLUSIVE_WASAPI) + " on default device");
 
 		for (const std::string &device : WASAPIStream::GetAudioDevices())
