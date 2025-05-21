@@ -528,6 +528,9 @@ void WASAPIStream::SoundLoop()
 
 				// Note that Dolphin audio volume doesn't impact pass-through audio.
 				// Pass-through audio volume is controlled by the Windows mixer directly
+				// However it does halve it, which is somewhat questionable for fluidity. Perhaps when we add a
+				// feature to auto-switch from normal output to the pass-through endpoint on 
+				// Dolphin start-up, we should also set that endpoint's volume to normal output + 6dB
 				if (SConfig::GetInstance().m_mixAudioIn)
 				{
 					CaptureAudioAndMix(reinterpret_cast<s16 *>(data), frames_in_buffer);

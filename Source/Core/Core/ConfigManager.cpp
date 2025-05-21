@@ -739,6 +739,8 @@ void SConfig::LoadDSPSettings(IniFile &ini)
 #endif
 	dsp->Get("Volume", &m_Volume, 25);
 	dsp->Get("CaptureLog", &m_DSPCaptureLog, false);
+	dsp->Get("MixAudioIn", &m_mixAudioIn);
+	dsp->Get("AudioInputDevice", &sAudioInputDevice);
 
 	// fix 5.8b style setting
 	if (sBackend == "Exclusive-mode WASAPI")

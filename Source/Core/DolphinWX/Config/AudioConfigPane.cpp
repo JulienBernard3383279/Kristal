@@ -143,6 +143,10 @@ void AudioConfigPane::LoadGUIValues()
 
 	m_time_stretching_checkbox->SetValue(startup_params.bTimeStretching);
 	m_RS_Hack_checkbox->SetValue(startup_params.bRSHACK);
+
+	m_mix_audio_in_checkbox->SetValue(startup_params.m_mixAudioIn);
+	m_audio_input_device_choice->Enable(startup_params.m_mixAudioIn);
+	m_audio_input_device_choice->SetStringSelection(StrToWxStr(startup_params.sAudioInputDevice));
 }
 
 void AudioConfigPane::ToggleBackendSpecificControls(const std::string &backend)
