@@ -663,7 +663,7 @@ void WASAPIStream::Stop()
 	m_audio_client = nullptr;
 }
 
-std::vector<std::string> WASAPIStream::GetAudioDevices()
+std::vector<std::string> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000_0001 audioDeviceMode)
 {
 	HRESULT hr = S_OK;
 	IMMDeviceEnumerator* mm_device_enumerator;
@@ -682,7 +682,7 @@ std::vector<std::string> WASAPIStream::GetAudioDevices()
 	}
 
 	IMMDeviceCollection* devices = nullptr;
-	hr = mm_device_enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices);
+	hr = mm_device_enumerator->EnumAudioEndpoints(audioDeviceMode, DEVICE_STATE_ACTIVE, &devices);
 
 	if(FAILED(hr))
 	{
@@ -739,4 +739,14 @@ std::vector<std::string> WASAPIStream::GetAudioDevices()
 	mm_device_enumerator->Release();
 
 	return results;
+}
+
+std::vector<std::string> WASAPIStream::GetRenderDeviceNames()
+{
+	return GetAudioDevices(eRender);
+}
+
+std::vector<std::string> WASAPIStream::GetCaptureDeviceNames()
+{
+	return GetAudioDevices(eCapture);
 }

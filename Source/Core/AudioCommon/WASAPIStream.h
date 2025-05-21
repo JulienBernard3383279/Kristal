@@ -43,7 +43,8 @@ public:
 		return true;
 	}
 
-	static std::vector<std::string> GetAudioDevices();
+	static std::vector<std::string> GetRenderDeviceNames();
+	static std::vector<std::string> GetCaptureDeviceNames();
 
 private:
 	IAudioClient* m_audio_client = nullptr;
@@ -61,7 +62,11 @@ private:
 public:
   WASAPIStream(bool exclusive_mode, std::string device = "Default") { }
 
-  inline static std::vector<std::string> GetAudioDevices()
+  inline static std::vector<std::string> GetRenderDevices()
+  {
+	  return {};
+  }
+  inline static std::vector<std::string> GetCaptureDevices()
   {
 	  return {};
   }

@@ -18,6 +18,7 @@ namespace AudioCommon
 void InitSoundStream(void *hwnd);
 void ShutdownSoundStream();
 std::vector<std::string> GetSoundBackends();
+std::vector<std::string> GetAudioInputDeviceNames();
 bool SupportsDPL2Decoder(const std::string &backend);
 bool SupportsLatencyControl(const std::string &backend);
 bool SupportsVolumeChanges(const std::string &backend);

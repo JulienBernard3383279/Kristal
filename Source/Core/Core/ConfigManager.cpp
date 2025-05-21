@@ -353,6 +353,8 @@ void SConfig::SaveDSPSettings(IniFile &ini)
 	dsp->Set("DumpAudioSilent", m_DumpAudioSilent);
 	dsp->Set("DumpUCode", m_DumpUCode);
 	dsp->Set("Backend", sBackend);
+	dsp->Set("MixAudioIn", m_mixAudioIn);
+	dsp->Set("AudioInputDevice", sAudioInputDevice);
 	dsp->Set("Volume", m_Volume);
 	dsp->Set("CaptureLog", m_DSPCaptureLog);
 }

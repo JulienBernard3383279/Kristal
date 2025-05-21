@@ -90,6 +90,8 @@ private:
 	float m_OCFactor;
 	std::string strBackend;
 	std::string sBackend;
+	bool bMixAudioIn;
+	std::string sAudioInputDevice;
 	std::string m_strGPUDeterminismMode;
 	std::array<int, MAX_BBMOTES> iWiimoteSource;
 	std::array<SIDevices, MAX_SI_CHANNELS> Pads;
@@ -120,6 +122,9 @@ void ConfigCache::SaveConfig(const SConfig& config)
 	m_EmulationSpeed = config.m_EmulationSpeed;
 	strBackend = config.m_strVideoBackend;
 	sBackend = config.sBackend;
+	bMixAudioIn = config.m_mixAudioIn;
+	sAudioInputDevice = config.sAudioInputDevice;
+
 	m_strGPUDeterminismMode = config.m_strGPUDeterminismMode;
 	iVideoRate = config.iVideoRate;
 	bHalfAudioRate = config.bHalfAudioRate;
@@ -203,6 +208,8 @@ void ConfigCache::RestoreConfig(SConfig* config)
 
 	config->m_strVideoBackend = strBackend;
 	config->sBackend = sBackend;
+	config->m_mixAudioIn = bMixAudioIn;
+	config->sAudioInputDevice = sAudioInputDevice;
 	config->m_strGPUDeterminismMode = m_strGPUDeterminismMode;
 	VideoBackendBase::ActivateBackend(config->m_strVideoBackend);
 }
@@ -302,6 +309,9 @@ bool BootCore(const std::string& _rFilename)
 		dsp_section->Get("EnableJIT", &SConfig::GetInstance().m_DSPEnableJIT,
 			SConfig::GetInstance().m_DSPEnableJIT);
 		dsp_section->Get("Backend", &SConfig::GetInstance().sBackend, SConfig::GetInstance().sBackend);
+		dsp_section->Get("MixAudioIn", &SConfig::GetInstance().m_mixAudioIn, SConfig::GetInstance().m_mixAudioIn);
+		dsp_section->Get("AudioInputDevice", &SConfig::GetInstance().sAudioInputDevice,
+		                 SConfig::GetInstance().sAudioInputDevice);
 		VideoBackendBase::ActivateBackend(StartUp.m_strVideoBackend);
 		core_section->Get("GPUDeterminismMode", &StartUp.m_strGPUDeterminismMode,
 			StartUp.m_strGPUDeterminismMode);

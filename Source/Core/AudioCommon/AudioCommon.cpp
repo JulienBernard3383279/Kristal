@@ -139,10 +139,13 @@ std::vector<std::string> GetSoundBackends()
 
 		backends.push_back(std::string(BACKEND_EXCLUSIVE_WASAPI) + " on default device");
 
-		for (const std::string &device : WASAPIStream::GetAudioDevices())
+		for (const std::string &device : WASAPIStream::GetRenderDeviceNames())
 			backends.push_back(std::string(BACKEND_EXCLUSIVE_WASAPI) + " on " + device);
 	}
 	return backends;
+}
+std::vector<std::string> GetAudioInputDeviceNames() {
+	return WASAPIStream::GetCaptureDeviceNames();
 }
 
 bool SupportsDPL2Decoder(const std::string &backend)

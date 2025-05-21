@@ -48,15 +48,26 @@ void AudioConfigPane::InitializeGUI()
 	    new DolphinSlider(this, wxID_ANY, 0, 0, 100, wxDefaultPosition, wxDefaultSize, wxSL_VERTICAL | wxSL_INVERSE);
 	m_volume_text = new wxStaticText(this, wxID_ANY, "");
 	m_audio_backend_choice = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, m_audio_backend_strings);
+	m_audio_backend_choice->SetToolTip(_("Changing this will have no effect while the emulator is running."));
 	m_audio_latency_spinctrl =
 	    new wxSpinCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 30);
+	m_audio_latency_spinctrl->SetToolTip(_("Sets the latency (in ms). Higher values may reduce audio "
+	                                       "crackling. Certain backends only."));
 	m_audio_latency_label = new wxStaticText(this, wxID_ANY, _("Latency:"));
+
+	m_mix_audio_in_checkbox = new wxCheckBox(this, wxID_ANY, _("Mix in audio from input device"));
+	m_mix_audio_in_checkbox->SetToolTip(_("Mixes in audio from an audio input device. "
+		"This is meant to be used with exclusive WASAPI audio output and a virtual audio cable that redirects "
+		"the output of the rest of the system to a virtual audio input device, that will be mixed with the "
+		"game audio, achieving the lowest latency (that of exclusive output) without giving up audio from the "
+		"rest of the system."));
+	m_audio_input_device_choice = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, m_audio_input_device_strings);
+	m_audio_input_device_choice->SetToolTip(
+	    _("Selects the audio audioInput device to use. This is only relevant when mixing in audio from an input device."));
 
 	m_time_stretching_checkbox = new wxCheckBox(this, wxID_ANY, _("Time Stretching"));
 	m_RS_Hack_checkbox = new wxCheckBox(this, wxID_ANY, _("Rogue Squadron 2/3 Hack"));
-	m_audio_backend_choice->SetToolTip(_("Changing this will have no effect while the emulator is running."));
-	m_audio_latency_spinctrl->SetToolTip(_("Sets the latency (in ms). Higher values may reduce audio "
-	                                       "crackling. Certain backends only."));
+
 	m_dpl2_decoder_checkbox->SetToolTip(
 	    _("Enables Dolby Pro Logic II emulation using 5.1 surround. Certain backends only."));
 
@@ -85,6 +96,10 @@ void AudioConfigPane::InitializeGUI()
 	backend_grid_sizer->Add(m_dpl2_decoder_checkbox, wxGBPosition(1, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_audio_latency_label, wxGBPosition(2, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_audio_latency_spinctrl, wxGBPosition(2, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(m_mix_audio_in_checkbox, wxGBPosition(3, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(new wxStaticText(this, wxID_ANY, _("Input Device:")), wxGBPosition(4, 0), wxDefaultSpan,
+	                        wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(m_audio_input_device_choice, wxGBPosition(4, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 
 	wxStaticBoxSizer *const backend_static_box_sizer = new wxStaticBoxSizer(wxVERTICAL, this, _("Backend Settings"));
 	backend_static_box_sizer->AddSpacer(space5);
@@ -112,6 +127,7 @@ void AudioConfigPane::LoadGUIValues()
 {
 	const SConfig &startup_params = SConfig::GetInstance();
 	PopulateBackendChoiceBox();
+	PopulateAudioInputDeviceChoiceBox();
 	ToggleBackendSpecificControls(SConfig::GetInstance().sBackend);
 
 	// Audio DSP Engine
@@ -157,8 +173,12 @@ void AudioConfigPane::BindEvents()
 
 	m_audio_latency_spinctrl->Bind(wxEVT_SPINCTRL, &AudioConfigPane::OnLatencySpinCtrlChanged, this);
 	m_audio_latency_spinctrl->Bind(wxEVT_UPDATE_UI, &WxEventUtils::OnEnableIfCoreNotRunning);
+
 	m_time_stretching_checkbox->Bind(wxEVT_CHECKBOX, &AudioConfigPane::OnTimeStretchingCheckBoxChanged, this);
 	m_RS_Hack_checkbox->Bind(wxEVT_CHECKBOX, &AudioConfigPane::OnRS_Hack_checkboxChanged, this);
+
+	m_mix_audio_in_checkbox->Bind(wxEVT_CHECKBOX, &AudioConfigPane::OnMixAudioInCheckBoxChanged, this);
+	m_audio_input_device_choice->Bind(wxEVT_CHOICE, &AudioConfigPane::OnAudioInputDeviceChanged, this);
 }
 
 void AudioConfigPane::OnDSPEngineRadioBoxChanged(wxCommandEvent &event)
@@ -217,6 +237,24 @@ void AudioConfigPane::OnLatencySpinCtrlChanged(wxCommandEvent &event)
 	SConfig::GetInstance().iLatency = m_audio_latency_spinctrl->GetValue();
 }
 
+void AudioConfigPane::OnMixAudioInCheckBoxChanged(wxCommandEvent &event)
+{
+	m_audio_input_device_choice->Enable(event.IsChecked());
+
+	/* if (event.IsChecked())
+	{
+		SConfig::GetInstance().m_MixAudioIn = true;
+	}
+	else
+	{
+		SConfig::GetInstance().m_MixAudioIn = false;
+	}*/
+}
+
+void AudioConfigPane::OnAudioInputDeviceChanged(wxCommandEvent &event) {
+
+}
+
 void AudioConfigPane::PopulateBackendChoiceBox()
 {
 	for (const std::string &backend : AudioCommon::GetSoundBackends())
@@ -226,4 +264,13 @@ void AudioConfigPane::PopulateBackendChoiceBox()
 
 	int num = m_audio_backend_choice->FindString(StrToWxStr(SConfig::GetInstance().sBackend));
 	m_audio_backend_choice->SetSelection(num);
+}
+
+void AudioConfigPane::PopulateAudioInputDeviceChoiceBox()
+{
+	for (const std::string &backend : AudioCommon::GetAudioInputDeviceNames())
+	{
+		m_audio_input_device_choice->Append(wxGetTranslation(StrToWxStr(backend)));
+	}
+	//TODO Selection & persistence
 }

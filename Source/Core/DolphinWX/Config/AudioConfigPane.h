@@ -26,6 +26,7 @@ private:
 	void BindEvents();
 
 	void PopulateBackendChoiceBox();
+	void PopulateAudioInputDeviceChoiceBox();
 	void ToggleBackendSpecificControls(const std::string& backend);
 
 	void OnDSPEngineRadioBoxChanged(wxCommandEvent&);
@@ -35,9 +36,12 @@ private:
 	void OnLatencySpinCtrlChanged(wxCommandEvent&);
 	void OnTimeStretchingCheckBoxChanged(wxCommandEvent&);
 	void OnRS_Hack_checkboxChanged(wxCommandEvent&);
-
+	void OnMixAudioInCheckBoxChanged(wxCommandEvent&);
+	void OnAudioInputDeviceChanged(wxCommandEvent&);
+	
 	wxArrayString m_dsp_engine_strings;
 	wxArrayString m_audio_backend_strings;
+	wxArrayString m_audio_input_device_strings;
 
 	wxRadioBox* m_dsp_engine_radiobox;
 	wxCheckBox* m_dpl2_decoder_checkbox;
@@ -48,4 +52,6 @@ private:
 	wxCheckBox* m_time_stretching_checkbox;
 	wxCheckBox* m_RS_Hack_checkbox;
 	wxStaticText* m_audio_latency_label;
+	wxCheckBox* m_mix_audio_in_checkbox;
+	wxChoice *m_audio_input_device_choice;
 };
