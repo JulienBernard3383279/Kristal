@@ -33,14 +33,21 @@ public:
 	virtual ~CMixer()
 	{}
 
-	// Called from audio threads
+	// Called from audio threads. Mixes the audio sources then provides mixed samples to the caller.
 	u32 Mix(s16* samples, u32 numSamples, bool consider_framelimit = true);
 	u32 Mix(float* samples, u32 numSamples, bool consider_framelimit = true);
 	u32 AvailableSamples();
+
 	// Called from main thread
 	virtual void PushSamples(const s16* samples, u32 num_samples);
 	virtual void PushStreamingSamples(const s16* samples, u32 num_samples);
 	virtual void PushWiimoteSpeakerSamples(const s16* samples, u32 num_samples, u32 sample_rate);
+	// Called from exclusive WASAPI audio backend only
+	//virtual void PushAudioInSamples(const s16 *samples, u32 num_samples);
+	//TODO Perhaps audio in should have its own volume
+	//TODO Handle emulation speed - audio in samples shouldn't be affected
+	//TODO Also not clear why we would push s16s rather than floats
+
 	u32 GetSampleRate() const
 	{
 		return m_sample_rate;
@@ -48,6 +55,7 @@ public:
 
 	void SetDMAInputSampleRate(u32 rate);
 	void SetStreamInputSampleRate(u32 rate);
+
 	void SetStreamingVolume(u32 lvolume, u32 rvolume);
 	void SetWiimoteSpeakerVolume(u32 lvolume, u32 rvolume);
 
@@ -140,6 +148,7 @@ protected:
 
 	CubicMixerFifo m_dma_mixer;
 	CubicMixerFifo m_streaming_mixer;
+	//CubicMixerFifo m_audio_in_mixer;
 
 	// Linear interpolation seems to be the best for Wiimote 3khz -> 48khz, for now.
 	// TODO: figure out why and make it work with the above FIR

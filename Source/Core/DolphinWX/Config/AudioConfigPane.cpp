@@ -240,19 +240,12 @@ void AudioConfigPane::OnLatencySpinCtrlChanged(wxCommandEvent &event)
 void AudioConfigPane::OnMixAudioInCheckBoxChanged(wxCommandEvent &event)
 {
 	m_audio_input_device_choice->Enable(event.IsChecked());
-
-	/* if (event.IsChecked())
-	{
-		SConfig::GetInstance().m_MixAudioIn = true;
-	}
-	else
-	{
-		SConfig::GetInstance().m_MixAudioIn = false;
-	}*/
+	SConfig::GetInstance().m_mixAudioIn = event.IsChecked();
 }
 
-void AudioConfigPane::OnAudioInputDeviceChanged(wxCommandEvent &event) {
-
+void AudioConfigPane::OnAudioInputDeviceChanged(wxCommandEvent &event)
+{
+	SConfig::GetInstance().sAudioInputDevice = WxStrToStr(m_audio_input_device_choice->GetStringSelection());
 }
 
 void AudioConfigPane::PopulateBackendChoiceBox()
@@ -274,3 +267,5 @@ void AudioConfigPane::PopulateAudioInputDeviceChoiceBox()
 	}
 	//TODO Selection & persistence
 }
+
+//TODO Only expose GUI for WASAPI exclusive mode

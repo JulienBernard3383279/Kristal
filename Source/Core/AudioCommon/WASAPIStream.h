@@ -46,9 +46,13 @@ public:
 	static std::vector<std::string> GetRenderDeviceNames();
 	static std::vector<std::string> GetCaptureDeviceNames();
 
-private:
+	bool InitializeCaptureClient();
+
+  private:
 	IAudioClient* m_audio_client = nullptr;
 	IAudioRenderClient * m_renderer = nullptr;
+	IAudioClient* m_capture_audio_client = nullptr;
+	IAudioCaptureClient* m_capture_client = nullptr;
 	std::string m_selected_device;
 
 	HANDLE m_need_data_event = nullptr;
@@ -58,6 +62,8 @@ private:
 	WAVEFORMATEXTENSIBLE fmt;
 
 	bool m_exclusive_mode;
+
+	void CaptureAudio(float* mix_buffer, u32 num_samples);
 #else
 public:
   WASAPIStream(bool exclusive_mode, std::string device = "Default") { }

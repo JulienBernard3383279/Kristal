@@ -292,6 +292,11 @@ bool WASAPIStream::Start()
 			hr = m_audio_client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, exclusiveStreamFlags,
 			                                exclusive_device_period, exclusive_device_period, format, nullptr);
 		}
+
+		if (SConfig::GetInstance().m_mixAudioIn)
+		{
+			InitializeCaptureClient();
+		}
 	}
 	else
 	{
@@ -750,3 +755,132 @@ std::vector<std::string> WASAPIStream::GetCaptureDeviceNames()
 {
 	return GetAudioDevices(eCapture);
 }
+
+bool WASAPIStream::InitializeCaptureClient()
+{
+	if (!m_exclusive_mode || !SConfig::GetInstance().m_mixAudioIn)
+		return true;
+
+	HRESULT hr;
+	IMMDeviceEnumerator* enumerator = nullptr;
+	hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+	                      (void**)&enumerator);
+	if (FAILED(hr))
+		return false;
+
+	IMMDevice* capture_device = nullptr;
+	std::string selected_device = SConfig::GetInstance().sAudioInputDevice;
+	
+	IMMDeviceCollection* devices = nullptr;
+	hr = enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &devices);
+	if (FAILED(hr))
+	{
+		enumerator->Release();
+		return false;
+	}
+
+	UINT count;
+	devices->GetCount(&count);
+	for (UINT i = 0; i < count; ++i)
+	{
+		IMMDevice* device = nullptr;
+		devices->Item(i, &device);
+
+		IPropertyStore* store = nullptr;
+		device->OpenPropertyStore(STGM_READ, &store);
+
+		PROPVARIANT name;
+		PropVariantInit(&name);
+		store->GetValue(PKEY_Device_FriendlyName, &name);
+
+		char name_cstr[2048];
+		size_t ret;
+
+		ret = wcstombs(name_cstr, name.pwszVal, sizeof(name_cstr));
+		if (ret == 2048)
+			name_cstr[2047] = '\0';
+
+		std::string name_stdstr = name_cstr;
+
+		for (int i = 0; i <= 9; i++)
+		{
+			if (name_stdstr.substr(0, std::string("0 - ").size()) == std::to_string(i) + " - ")
+				name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(i) + "]";
+		}
+
+		if (name_stdstr == m_selected_device)
+			capture_device = device;
+
+		PropVariantClear(&name);
+		store->Release();
+		if (capture_device != device)
+			device->Release();
+	}
+	devices->Release();
+
+	if (!capture_device)
+	{
+		enumerator->Release();
+		return false;
+	}
+
+	hr = capture_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&m_capture_audio_client);
+	if (FAILED(hr))
+	{
+		capture_device->Release();
+		enumerator->Release();
+		return false;
+	}
+
+	WAVEFORMATEX* format = nullptr;
+	hr = m_capture_audio_client->GetMixFormat(&format);
+	if (FAILED(hr))
+	{
+		capture_device->Release();
+		enumerator->Release();
+		return false;
+	}
+
+	hr = m_capture_audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 0, 0, format, nullptr);
+	if (FAILED(hr))
+	{
+		CoTaskMemFree(format);
+		capture_device->Release();
+		enumerator->Release();
+		return false;
+	}
+
+	hr = m_capture_audio_client->GetService(__uuidof(IAudioCaptureClient), (void**)&m_capture_client);
+	CoTaskMemFree(format);
+	capture_device->Release();
+	enumerator->Release();
+	return SUCCEEDED(hr);
+}
+
+//TODO Since we call this from event driven, we should just ask for the number of samples we need to mix
+void WASAPIStream::CaptureAudio(float* mix_buffer, u32 num_samples)
+{
+	if (!m_capture_client || !SConfig::GetInstance().m_mixAudioIn)
+		return;
+
+	UINT32 packet_length = 0;
+	m_capture_client->GetNextPacketSize(&packet_length);
+
+	while (packet_length > 0)
+	{
+		BYTE* data;
+		UINT32 num_frames;
+		DWORD flags;
+		m_capture_client->GetBuffer(&data, &num_frames, &flags, nullptr, nullptr);
+
+		float* float_data = reinterpret_cast<float*>(data);
+		for (UINT32 i = 0; i < num_frames * 2 && i < num_samples * 2; ++i)
+		{
+			mix_buffer[i] += float_data[i];
+		}
+
+		m_capture_client->ReleaseBuffer(num_frames);
+		m_capture_client->GetNextPacketSize(&packet_length);
+	}
+}
+//TODO: Handle jukebox (ignore this line)

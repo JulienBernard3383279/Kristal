@@ -25,6 +25,7 @@ const float CMixer::CONTROL_AVG = 32;
 CMixer::CMixer(u32 BackendSampleRate)
     : m_dma_mixer(this, 32000)
     , m_streaming_mixer(this, 48000)
+    //, m_audio_in_mixer(this, 48000)
     , m_wiimote_speaker_mixer(this, 3000)
     , m_sample_rate(BackendSampleRate)
     , m_log_dtk_audio(0)
@@ -167,15 +168,19 @@ u32 CMixer::Mix(s16 *samples, u32 num_samples, bool consider_framelimit)
 	return num_samples;
 }
 
-u32 CMixer::Mix(float *samples, u32 num_samples, bool consider_framelimit)
+u32 CMixer::Mix(float* samples, u32 num_samples, bool consider_framelimit)
 {
 	if (!samples)
 		return 0;
+
 	std::lock_guard<std::mutex> lk(m_cs_mixing);
 	memset(samples, 0, num_samples * 2 * sizeof(float));
+
 	m_dma_mixer.Mix(samples, num_samples, consider_framelimit);
 	m_streaming_mixer.Mix(samples, num_samples, consider_framelimit);
 	m_wiimote_speaker_mixer.Mix(samples, num_samples, consider_framelimit);
+	//m_audio_in_mixer.Mix(samples, num_samples, consider_framelimit);
+
 	return num_samples;
 }
 
@@ -224,6 +229,11 @@ void CMixer::PushStreamingSamples(const s16 *samples, u32 num_samples)
 	if (m_log_dtk_audio)
 		g_wave_writer_dtk.AddStereoSamplesBE(samples, num_samples, sample_rate);
 }
+
+/*void CMixer::PushAudioInSamples(const s16 *samples, u32 num_samples)
+{
+	m_audio_in_mixer.PushSamples(samples, num_samples);
+}*/
 
 void CMixer::PushWiimoteSpeakerSamples(const s16 *samples, u32 num_samples, u32 sample_rate)
 {
