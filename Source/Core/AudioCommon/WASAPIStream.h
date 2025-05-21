@@ -8,6 +8,7 @@
 
 #include <string>
 #include <vector>
+#include <deque>
 
 #ifdef _WIN32
 #include <audioclient.h>
@@ -61,6 +62,7 @@ public:
 
 	bool m_exclusive_mode;
 
+	std::deque<s16> m_internal_capture_buffer;
 	bool InitializeCaptureClient();
 	WAVEFORMATEXTENSIBLE captureFormat;
 	void CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples);

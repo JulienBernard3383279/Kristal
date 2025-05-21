@@ -532,9 +532,6 @@ void WASAPIStream::SoundLoop()
 				for (u32 i = 0; i < frames_in_buffer * 2; i++) // Stereo
 					s16_data[i] = static_cast<s16>(s16_data[i] * volume);
 
-				for (u32 i = 0; i < frames_in_buffer * 2; i++)
-					reinterpret_cast<s16 *>(data)[i] = static_cast<s16>(reinterpret_cast<s16 *>(data)[i] * volume);
-
 				m_renderer->ReleaseBuffer(frames_in_buffer,
 				                          Core::GetState() != Core::CORE_RUN ? AUDCLNT_BUFFERFLAGS_SILENT : 0);
 			}
@@ -892,38 +889,69 @@ bool WASAPIStream::InitializeCaptureClient()
 	return true;
 }
 
-void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples_to_render)
+void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_frames_to_render_target)
 {
 	if (!m_capture_client || !SConfig::GetInstance().m_mixAudioIn || !m_capture_audio_client)
-		return;
-
-	// Overall mix = (mix_buffer + captured audio) / 2
-	// Always halve the mix buffer even if we can't get captured audio so whether we get captured audio doesn't change perceived volume
-	for (u32 i = 0; i < num_samples_to_render * 2; ++i) // Stereo
-		mix_buffer[i] = mix_buffer[i] / 2;
-
-	UINT32 packet_length = 0;
-	HRESULT hr = m_capture_client->GetNextPacketSize(&packet_length);
-	if (FAILED(hr))
 	{
-		ERROR_LOG(AUDIO, "Capture: Failed to get next packet size: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-		if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
-		{
-			WARN_LOG(AUDIO, "Capture device invalidated. Disabling further capture for this session.");
-			SAFE_RELEASE(m_capture_client);
-		}
 		return;
 	}
 
-	while (packet_length > 0)
-	{
-		BYTE *captured_data_ptr;    // Renamed
-		UINT32 num_frames_captured; // Renamed
-		DWORD flags;
+	/* The capture API is such that we need to always retrieve the full buffer, or not at all.
+	Because the full buffer for capture is not guaranteed to be the same size as the render buffer,
+	that means we can't just ask the capture stream to give us the number of samples we need: we 
+	have to handle buffering ourselves, this is what the deque is about.*/
 
-		//TODO We only want to consume at most num_samples_to_render
-		// Here it looks like we capture all the frames, and let them know we consumed all of them in ReleaseBuffer
-		hr = m_capture_client->GetBuffer(&captured_data_ptr, &num_frames_captured, &flags, nullptr, nullptr);
+	// Overall mix = (mix_buffer + captured audio) / 2
+	// Always halve the mix buffer even if we can't get captured audio so whether we get captured audio doesn't change the perceived volume
+	u32 num_shorts_to_render_target = num_frames_to_render_target * 2; // Stereo samples
+	for (u32 i = 0; i < num_shorts_to_render_target; ++i)
+		mix_buffer[i] /= 2;
+
+	u32 shorts_mixed_this_cycle = 0;
+
+	// Phase 1: Consume from our internal buffer first
+	while (shorts_mixed_this_cycle < num_shorts_to_render_target && !m_internal_capture_buffer.empty())
+	{
+		mix_buffer[shorts_mixed_this_cycle] += m_internal_capture_buffer.front() / 2;
+		m_internal_capture_buffer.pop_front();
+		shorts_mixed_this_cycle++;
+	}
+
+	// Phase 2: If still need more data for the current render target, fetch new packets from the device
+	while (shorts_mixed_this_cycle < num_shorts_to_render_target)
+	{
+		UINT32 packet_size_in_frames = 0;
+		HRESULT hr = m_capture_client->GetNextPacketSize(&packet_size_in_frames);
+
+		if (FAILED(hr))
+		{
+			ERROR_LOG(AUDIO, "Capture: Failed to get next packet size: HRESULT %s",
+			          wasapi_hresult_to_string(hr).c_str());
+			if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+			{
+				WARN_LOG(AUDIO, "Capture device invalidated. Disabling further capture for this session.");
+				SAFE_RELEASE(m_capture_client); // Prevent further calls
+			}
+			return;
+		}
+
+		if (packet_size_in_frames == 0)
+		{
+			break; // No more data currently available from device
+		}
+
+		BYTE *p_capture_data_packet = nullptr;
+		UINT32 frames_in_packet = 0; // This will be set by GetBuffer to the actual packet size
+		DWORD packet_flags = 0;
+
+		hr = m_capture_client->GetBuffer(&p_capture_data_packet, &frames_in_packet, &packet_flags, nullptr, nullptr);
+
+		if (hr == AUDCLNT_S_BUFFER_EMPTY)
+		{
+			// This should ideally be caught by packet_size_in_frames == 0 from GetNextPacketSize.
+			// If it happens, just try to get the next packet size again in the next loop iteration (if any).
+			continue;
+		}
 		if (FAILED(hr))
 		{
 			ERROR_LOG(AUDIO, "Capture: Failed to get buffer: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
@@ -935,30 +963,29 @@ void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples_to_render
 			return;
 		}
 
-		if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
+		if (!(packet_flags & AUDCLNT_BUFFERFLAGS_SILENT) && p_capture_data_packet != nullptr)
 		{
-			// INFO_LOG(AUDIO, "Silent audio buffer received from audio in device for %u frames.", num_frames_captured);
-		}
-		else if (captured_data_ptr != nullptr)
-		{
-			s16 *s16_captured_data = reinterpret_cast<s16 *>(captured_data_ptr);
-			// Mix captured data, careful not to write past mix_buffer
-			// num_frames_captured is in frames, num_samples_to_render is also in frames.
-			// Each frame has 2 s16 samples (stereo).
-			UINT32 samples_to_mix = num_frames_captured * 2; // Number of s16 samples
-			if (samples_to_mix > num_samples_to_render * 2)
-			{
-				samples_to_mix = num_samples_to_render * 2; // Don't overflow render buffer
-			}
+			s16 *s16_capture_data = reinterpret_cast<s16 *>(p_capture_data_packet);
+			u32 shorts_in_packet = frames_in_packet * 2; // Stereo samples in the captured packet
 
-			for (UINT32 i = 0; i < samples_to_mix; ++i)
+			for (u32 i = 0; i < shorts_in_packet; ++i)
 			{
-				// Add captured audio (also halved) to the already halved mix_buffer
-				mix_buffer[i] += s16_captured_data[i] / 2;
+				if (shorts_mixed_this_cycle < num_shorts_to_render_target)
+				{
+					// Add captured audio (also halved) to the already halved mix_buffer
+					mix_buffer[shorts_mixed_this_cycle] += s16_capture_data[i] / 2;
+					shorts_mixed_this_cycle++;
+				}
+				else
+				{
+					// We have filled the render buffer for this cycle, buffer the rest internally
+					m_internal_capture_buffer.push_back(s16_capture_data[i]);
+				}
 			}
 		}
-
-		hr = m_capture_client->ReleaseBuffer(num_frames_captured);
+		// If AUDCLNT_BUFFERFLAGS_SILENT is set, or p_capture_data_packet is null (though GetBuffer S_OK should ensure
+		// it's not), we effectively mix silence (or rather, don't add anything to the already halved mix_buffer).
+		hr = m_capture_client->ReleaseBuffer(frames_in_packet);
 		if (FAILED(hr))
 		{
 			ERROR_LOG(AUDIO, "Capture: Failed to release buffer: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
@@ -969,18 +996,8 @@ void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples_to_render
 			}
 			return;
 		}
-
-		hr = m_capture_client->GetNextPacketSize(&packet_length);
-		if (FAILED(hr))
-		{
-			ERROR_LOG(AUDIO, "Capture: Failed to get next packet size (loop): HRESULT %s",
-			          wasapi_hresult_to_string(hr).c_str());
-			if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
-			{
-				WARN_LOG(AUDIO, "Capture device invalidated. Disabling further capture.");
-				SAFE_RELEASE(m_capture_client);
-			}
-			return;
-		}
 	}
+	// At this point, mix_buffer has been processed up to shorts_mixed_this_cycle.
+	// Any remaining part of mix_buffer (if shorts_mixed_this_cycle < num_shorts_to_render_target)
+	// will not have captured audio mixed in for this call if no more packets were available.
 }
