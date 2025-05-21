@@ -7,16 +7,17 @@
 #include "Core/Core.h"
 #include "VideoCommon/OnScreenDisplay.h"
 
-#include <mmdeviceapi.h>
 #include <avrt.h>
+#include <mmdeviceapi.h>
 
 #include <locale>
+#include <sstream> // Required for ostringstream
 
 static std::string wasapi_hresult_to_string(HRESULT res)
 {
-	switch(res)
+	switch (res)
 	{
-#define DEFINE_FOR(hres) case hres: return #hres; 
+#define DEFINE_FOR(hres) case hres: return #hres;
 		DEFINE_FOR(AUDCLNT_E_NOT_INITIALIZED)
 		DEFINE_FOR(AUDCLNT_E_ALREADY_INITIALIZED)
 		DEFINE_FOR(AUDCLNT_E_WRONG_ENDPOINT_TYPE)
@@ -50,7 +51,14 @@ static std::string wasapi_hresult_to_string(HRESULT res)
 	return "UNKNOWN, " + std::to_string(res);
 }
 
-#define SAFE_RELEASE(p) { if ((p)) { (p)->Release(); (p)=nullptr; } }
+#define SAFE_RELEASE(p)                                                                                                \
+	{                                                                                                                  \
+		if ((p))                                                                                                       \
+		{                                                                                                              \
+			(p)->Release();                                                                                            \
+			(p) = nullptr;                                                                                             \
+		}                                                                                                              \
+	}
 
 #ifndef PKEY_Device_FriendlyName
 DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0, 14);
@@ -71,15 +79,15 @@ DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0
    >buffer-servicing thread to schedule its execution to occur when a new buffer becomes available from the audio device.
    https://learn.microsoft.com/en-us/windows/win32/coreaudio/exclusive-mode-streams */
 
-
 // TODO
 // Ensure volume control works in both modes
-// Ensure change of output device works in shared mode (see Windows SDK samples linked in https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)
+// Ensure change of output device works in shared mode (see Windows SDK samples linked in
+// https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)
 
 bool WASAPIStream::Start()
 {
 	HRESULT hr = S_OK;
-	IMMDeviceEnumerator* mm_device_enumerator;
+	IMMDeviceEnumerator *mm_device_enumerator = nullptr;
 
 	hr = CoCreateInstance(
 		__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
@@ -87,36 +95,53 @@ bool WASAPIStream::Start()
 		(void**)&mm_device_enumerator
 	);
 
-	if(FAILED(hr))
+	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		ERROR_LOG(AUDIO, "WASAPIStream: Error @ CoCreateInstance of MMDeviceEnumerator");
+		// mm_device_enumerator is already null or CoCreateInstance failed
 		return false;
 	}
 
-	IMMDevice* mm_device = nullptr;
+	IMMDevice *mm_device = nullptr;
 
 	std::string lower_device = "";
-	for(char c : m_selected_device)
+	for (char c : m_selected_device)
 		lower_device += std::tolower(c, std::locale::classic());
 
-	if(lower_device.find("default") != std::string::npos)
+	if (lower_device.find("default") != std::string::npos)
+	{
 		hr = mm_device_enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &mm_device);
+		if (FAILED(hr))
+		{
+			ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			ERROR_LOG(AUDIO, "WASAPIStream: Error @ MMDeviceEnumerator::GetDefaultAudioEndpoint");
+			SAFE_RELEASE(mm_device_enumerator);
+			return false;
+		}
+	}
 	else
 	{
-		IMMDeviceCollection* devices = nullptr;
+		IMMDeviceCollection *devices = nullptr;
 		hr = mm_device_enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices);
+		if (FAILED(hr))
+		{
+			ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			ERROR_LOG(AUDIO, "WASAPIStream: Error @ MMDeviceEnumerator::EnumAudioEndpoints");
+			SAFE_RELEASE(mm_device_enumerator);
+			return false;
+		}
 
 		UINT device_count = 0;
 		devices->GetCount(&device_count);
 
-		for(UINT i = 0; i < device_count; i++)
+		for (UINT i = 0; i < device_count; i++)
 		{
-			IMMDevice* device;
-			devices->Item(i, &device);
+			IMMDevice *device_item = nullptr; // Use a temporary variable to avoid releasing mm_device prematurely
+			devices->Item(i, &device_item);
 
-			IPropertyStore* pstore;
-			device->OpenPropertyStore(STGM_READ, &pstore);
+			IPropertyStore *pstore = nullptr;
+			device_item->OpenPropertyStore(STGM_READ, &pstore);
 
 			PROPVARIANT name_prop;
 			PropVariantInit(&name_prop);
@@ -131,68 +156,63 @@ bool WASAPIStream::Start()
 
 			std::string name_stdstr = name_cstr;
 
-			for(int i = 0; i <= 9; i++)
+			for (int j = 0; j <= 9; j++)
 			{
-				if(name_stdstr.substr(0, std::string("0 - ").size()) == std::to_string(i) + " - ")
-					name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(i) + "]";
+				if (name_stdstr.substr(0, std::string("0 - ").size()) == std::to_string(j) + " - ")
+					name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(j) + "]";
 			}
 
-			// if(name_stdstr.size() > 40)
-			//     name_stdstr = name_stdstr.substr(0, 40) + "...";
-			// needs to be preserved for uniqueness
-
-			if(name_stdstr == m_selected_device)
-				mm_device = device;
+			if (name_stdstr == m_selected_device)
+			{
+				mm_device =
+				    device_item; // Assign and it will be released later if not used, or by SAFE_RELEASE(mm_device)
+			}
 
 			PropVariantClear(&name_prop);
+			SAFE_RELEASE(pstore);
 
-			pstore->Release();
-
-			if(mm_device != device)
-				device->Release();
+			if (mm_device != device_item) // If this item is not the selected one, release it now
+				SAFE_RELEASE(device_item);
 		}
-
-		devices->Release();
+		SAFE_RELEASE(devices);
 	}
 
-	if(mm_device == nullptr)
+	if (mm_device == nullptr)
 	{
-		OSD::AddMessage("Invalid audio device \"" + m_selected_device + "\" selected for WASAPI. Check your backend settings.", 6000U);
+		OSD::AddMessage("Invalid audio device \"" + m_selected_device +
+		                    "\" selected for WASAPI. Check your backend settings.",
+		                6000U);
+		SAFE_RELEASE(mm_device_enumerator);
 		return false;
 	}
 
-	if(FAILED(hr))
+
+	hr = mm_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void **)&m_audio_client);
+
+	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-		ERROR_LOG(AUDIO, "WASAPIStream: Error @ MMDeviceEnumerator::GetDefaultAudioEndpoint");
-		return false;
-	}
-
-	hr = mm_device->Activate(
-		__uuidof(IAudioClient),
-		CLSCTX_ALL, NULL,
-		(void**)&m_audio_client
-	);
-
-	if(FAILED(hr))
-	{
-		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-		ERROR_LOG(AUDIO, "WASAPIStream: Error @ MMDeviceEnumerator -> IAudioClient");
+		ERROR_LOG(AUDIO, "WASAPIStream: Error @ MMDevice::Activate -> IAudioClient");
+		SAFE_RELEASE(mm_device_enumerator);
+		SAFE_RELEASE(mm_device);
+		// m_audio_client is not valid or null
 		return false;
 	}
 
 	LPWSTR id;
-	mm_device->GetId(&id);
+	mm_device->GetId(&id); // HRESULT ignored here, but GetId is unlikely to fail if Activate succeeded
 
 	char buffer[2048];
-	size_t ret;
+	size_t ret_id;
 
-	ret = wcstombs(buffer, id, sizeof(buffer));
-	if(ret == 2048) buffer[2047] = '\0';
+	ret_id = wcstombs(buffer, id, sizeof(buffer));
+	if (ret_id == 2048)
+		buffer[2047] = '\0';
+	CoTaskMemFree(id); // Free the string allocated by GetId
 
 	INFO_LOG(AUDIO, "WASAPIStream: Using device %s", buffer);
 
-	fmt = { 0 };
+	fmt = {0};
 	fmt.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
 	fmt.Format.nChannels = 2;
 	fmt.Format.nSamplesPerSec = 48000;
@@ -206,14 +226,6 @@ bool WASAPIStream::Start()
 	fmt.dwChannelMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
 	fmt.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
 
-	/* WAVEFORMATEX* fmtex;
-	m_audio_client->GetMixFormat(&fmtex);
-	fmt = *reinterpret_cast<PWAVEFORMATEXTENSIBLE>(fmtex); */
-
-	#define AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000
-	#define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000
-
-
 	REFERENCE_TIME default_legacy_device_period;
 	REFERENCE_TIME minimum_legacy_device_period;
 	hr = m_audio_client->GetDevicePeriod(&default_legacy_device_period, &minimum_legacy_device_period);
@@ -225,27 +237,22 @@ bool WASAPIStream::Start()
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		ERROR_LOG(AUDIO, "WASAPIStream: Couldn't get minimum device period.");
 
-		m_audio_client->Release();
-		m_audio_client = nullptr;
-
-		mm_device_enumerator->Release();
-		mm_device->Release();
-
+		SAFE_RELEASE(m_audio_client);
+		SAFE_RELEASE(mm_device_enumerator);
+		SAFE_RELEASE(mm_device);
 		return false;
 	}
 
 	DWORD exclusiveStreamFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST;
 	DWORD sharedStreamFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
-	auto format = reinterpret_cast<WAVEFORMATEX *>(&fmt);
+	auto format_ptr = reinterpret_cast<WAVEFORMATEX *>(&fmt);
 
 	if (m_exclusive_mode)
 	{
-		// Exclusive mode => Use AudioClient1 => legacy device periods (can get short buffers anyway)
-
-		exclusive_device_period += SConfig::GetInstance().iLatency * (10000 / fmt.Format.nChannels);
+		exclusive_device_period += SConfig::GetInstance().iLatency * 10000;
 
 		hr = m_audio_client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, exclusiveStreamFlags, exclusive_device_period,
-		                                exclusive_device_period, format, nullptr);
+		                                exclusive_device_period, format_ptr, nullptr);
 
 		if (hr == AUDCLNT_E_UNSUPPORTED_FORMAT)
 			OSD::AddMessage("Your current audio device doesn't support 16-bit 48000 hz PCM audio. WASAPI exclusive "
@@ -257,45 +264,47 @@ bool WASAPIStream::Start()
 			ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 			INFO_LOG(AUDIO, "WASAPIStream: Device period not aligned, attempting to fix...");
 
-			hr = m_audio_client->GetBufferSize(&frames_in_buffer);
-			m_audio_client->Release();
+			UINT32 temp_frames_in_buffer;
+			HRESULT hr_align_bufsize = m_audio_client->GetBufferSize(&temp_frames_in_buffer);
+			SAFE_RELEASE(m_audio_client); // Release the current client instance before re-activating
 
-			if (FAILED(hr))
+			if (FAILED(hr_align_bufsize))
 			{
-				ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+				ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr_align_bufsize).c_str());
 				ERROR_LOG(AUDIO, "WASAPIStream: Couldn't get buffer size for alignment.");
-
-				m_audio_client = nullptr;
-				mm_device_enumerator->Release();
-				mm_device->Release();
-
+				SAFE_RELEASE(mm_device_enumerator);
+				SAFE_RELEASE(mm_device);
 				return false;
 			}
 
 			exclusive_device_period =
-			    static_cast<REFERENCE_TIME>(10000.0 * 1000 * frames_in_buffer / fmt.Format.nSamplesPerSec + 0.5) +
+			    static_cast<REFERENCE_TIME>(10000.0 * 1000 * temp_frames_in_buffer / fmt.Format.nSamplesPerSec + 0.5) +
 			    SConfig::GetInstance().iLatency * 10000;
 
+			// Need to re-activate to get a new IAudioClient instance
 			hr = mm_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void **)&m_audio_client);
-
 			if (FAILED(hr))
 			{
 				ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-				ERROR_LOG(AUDIO, "WASAPIStream: Error @ MMDeviceEnumerator -> IAudioClient");
-
-				mm_device_enumerator->Release();
-				mm_device->Release();
-
+				ERROR_LOG(AUDIO, "WASAPIStream: Error @ MMDevice::Activate (alignment fix) -> IAudioClient");
+				SAFE_RELEASE(mm_device_enumerator);
+				SAFE_RELEASE(mm_device);
+				// m_audio_client is already null or invalid
 				return false;
 			}
 
-			hr = m_audio_client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, exclusiveStreamFlags,
-			                                exclusive_device_period, exclusive_device_period, format, nullptr);
+			hr = m_audio_client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, exclusiveStreamFlags, exclusive_device_period,
+			                                exclusive_device_period, format_ptr, nullptr);
 		}
 
-		if (SConfig::GetInstance().m_mixAudioIn)
+		if (SUCCEEDED(hr) && SConfig::GetInstance().m_mixAudioIn)
 		{
-			InitializeCaptureClient();
+			if (!InitializeCaptureClient())
+			{
+				ERROR_LOG(AUDIO, "WASAPIStream: Failed to initialize capture client. Audio will not start.");
+				// hr = E_FAIL; // Uncommenting this causes capture client init failing to cause overall audio init to
+				// fail Currently we let audio work even if audio mix-in was asked for but doesn't work
+			}
 		}
 	}
 	else
@@ -307,46 +316,42 @@ bool WASAPIStream::Start()
 
 		if (FAILED(hr))
 		{
-			std::string message = "QueryInterface for IAudioClient3 failed: " + wasapi_hresult_to_string(hr) + ". Falling back to legacy Initialize.\n";
+			std::string message = "QueryInterface for IAudioClient3 failed: " + wasapi_hresult_to_string(hr) +
+			                      ". Falling back to legacy Initialize.\n";
 			ERROR_LOG(AUDIO, message.c_str());
 
 			// If no IAudioClient3 interface (e.g. W7), fall back to legacy Initialize
 			hr = m_audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, sharedStreamFlags, default_legacy_device_period,
-			                                0, format, nullptr);
+			                                0, format_ptr, nullptr);
 		}
 		else
 		{
 			UINT32 defaultPeriod, fundamentalPeriod, minPeriod, maxPeriod{};
-			hr = audio_client_3->GetSharedModeEnginePeriod(format, &defaultPeriod, &fundamentalPeriod, &minPeriod,
-			                                               &maxPeriod);
-			if (SUCCEEDED(hr))
+			HRESULT hr_period = audio_client_3->GetSharedModeEnginePeriod(format_ptr, &defaultPeriod,
+			                                                              &fundamentalPeriod, &minPeriod, &maxPeriod);
+			if (SUCCEEDED(hr_period))
 			{
 				std::ostringstream oss{};
-				oss << "Shared Mode Engine Periods (frames @ " << format->nSamplesPerSec << " Hz):\n";
-				oss << "  Default:     " << defaultPeriod << " ("
-				    << (double)defaultPeriod * 1000.0 / format->nSamplesPerSec << " ms)\n";
-				oss << "  Fundamental: " << fundamentalPeriod << " ("
-				    << (double)fundamentalPeriod * 1000.0 / format->nSamplesPerSec << " ms)\n";
-				oss << "  Min:         " << minPeriod << " (" << (double)minPeriod * 1000.0 / format->nSamplesPerSec
-				    << " ms)\n";
-				oss << "  Max:         " << maxPeriod << " (" << (double)maxPeriod * 1000.0 / format->nSamplesPerSec
-				    << " ms)\n";
-
+				oss << "Shared Mode Engine Periods (frames @ " << format_ptr->nSamplesPerSec << " Hz):\n";
+				oss << "  Default:     " << defaultPeriod << " (" << (double)defaultPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
+				oss << "  Fundamental: " << fundamentalPeriod << " (" << (double)fundamentalPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
+				oss << "  Min:         " << minPeriod << " (" << (double)minPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
+				oss << "  Max:         " << maxPeriod << " (" << (double)maxPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
 				INFO_LOG(AUDIO, oss.str().c_str());
 
 				OSD::AddMessage(std::string{"Using audio engine period: " +
-				                            std::to_string((double)minPeriod * 1000.0 / format->nSamplesPerSec) +
+				                            std::to_string((double)minPeriod * 1000.0 / format_ptr->nSamplesPerSec) +
 				                            " ms (Shared WASAPI)"},
 				                10000U);
 			}
 			else
 			{
 				minPeriod = 0; // 0 means use default period
-				ERROR_LOG(AUDIO,
-				          std::string{"GetSharedModeEnginePeriod failed: " + wasapi_hresult_to_string(hr)}.c_str());
+				ERROR_LOG( AUDIO,
+					std::string{"GetSharedModeEnginePeriod failed: " + wasapi_hresult_to_string(hr_period)}.c_str());
 			}
 
-			hr = audio_client_3->InitializeSharedAudioStream(sharedStreamFlags, minPeriod, format, nullptr);
+			hr = audio_client_3->InitializeSharedAudioStream(sharedStreamFlags, minPeriod, format_ptr, nullptr);
 			if (FAILED(hr))
 			{
 				ERROR_LOG(AUDIO,
@@ -356,16 +361,24 @@ bool WASAPIStream::Start()
 		}
 	}
 
-	mm_device_enumerator->Release();
-	mm_device->Release();
+	SAFE_RELEASE(mm_device_enumerator);
+	SAFE_RELEASE(mm_device);
 
-	if(FAILED(hr))
+	auto cleanUpAudioClients = [&](bool stopCaptureClient = true)
 	{
-		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		SAFE_RELEASE(m_audio_client);
+		if (m_exclusive_mode && SConfig::GetInstance().m_mixAudioIn && m_capture_audio_client)
+		{
+			m_capture_audio_client->Stop();
+			SAFE_RELEASE(m_capture_client);
+			SAFE_RELEASE(m_capture_audio_client);
+		}
+	};
 
-		m_audio_client->Release();
-		m_audio_client = nullptr;
-
+	if (FAILED(hr)) // This hr is primarily from IAudioClient::Initialize or InitializeCaptureClient failure
+	{
+		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s during Initialize", wasapi_hresult_to_string(hr).c_str());
+		cleanUpAudioClients(false);
 		return false;
 	}
 
@@ -374,56 +387,56 @@ bool WASAPIStream::Start()
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		ERROR_LOG(AUDIO, "WASAPIStream: Couldn't get buffer size.");
-
-		m_audio_client = nullptr;
-		m_audio_client->Release();
-
+		cleanUpAudioClients();
 		return false;
 	}
 	else
 	{
 		double bufferInMs = (double)frames_in_buffer * 1000.0 / fmt.Format.nSamplesPerSec;
-		INFO_LOG(AUDIO, "WASAPIStream: Buffer size: %u frames; %f ms", frames_in_buffer);
-
-		OSD::AddMessage("Effective audio buffer size: " + std::to_string(bufferInMs) + " ms",
-		                10000U);
+		INFO_LOG(AUDIO, "WASAPIStream: Buffer size: %u frames; %f ms", frames_in_buffer, bufferInMs);
+		OSD::AddMessage("Effective audio buffer size: " + std::to_string(bufferInMs) + " ms", 10000U);
 	}
 
 	m_need_data_event = CreateEvent(NULL, FALSE, FALSE, NULL);
-	m_audio_client->SetEventHandle(m_need_data_event);
+	if (m_need_data_event == NULL)
+	{
+		ERROR_LOG(AUDIO, "WASAPIStream: Failed to create event handle.");
+		cleanUpAudioClients();
+		return false;
+	}
 
-	hr = m_audio_client->GetService(
-		__uuidof(IAudioRenderClient),
-		(void**)&m_renderer
-	);
+	hr = m_audio_client->SetEventHandle(m_need_data_event);
+	if (FAILED(hr)) // Should not fail if handle is valid
+	{
+		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		ERROR_LOG(AUDIO, "WASAPIStream: Failed to set event handle.");
+		CloseHandle(m_need_data_event);
+		m_need_data_event = nullptr;
+		cleanUpAudioClients();
+		return false;
+	}
 
-	if(FAILED(hr))
+	hr = m_audio_client->GetService(__uuidof(IAudioRenderClient), (void **)&m_renderer);
+
+	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		ERROR_LOG(AUDIO, "WASAPIStream: Couldn't get IAudioClient renderer.");
-
 		CloseHandle(m_need_data_event);
-		m_audio_client->Release();
-
 		m_need_data_event = nullptr;
-		m_audio_client = nullptr;
+		cleanUpAudioClients();
 		return false;
 	}
 
 	hr = m_audio_client->Start();
-
-	if(FAILED(hr))
+	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		ERROR_LOG(AUDIO, "WASAPIStream: Couldn't start audio client.");
-
 		CloseHandle(m_need_data_event);
-		m_renderer->Release();
-		m_audio_client->Release();
-
 		m_need_data_event = nullptr;
-		m_renderer = nullptr;
-		m_audio_client = nullptr;
+		SAFE_RELEASE(m_renderer);
+		cleanUpAudioClients();
 		return false;
 	}
 
@@ -433,7 +446,7 @@ bool WASAPIStream::Start()
 
 void WASAPIStream::SoundLoop()
 {
-	if(m_audio_client && m_renderer && m_need_data_event)
+	if (m_audio_client && m_renderer && m_need_data_event)
 	{
 		Common::SetCurrentThreadName("WASAPI Event Thread");
 
@@ -446,22 +459,32 @@ void WASAPIStream::SoundLoop()
 		{
 			DWORD error = GetLastError();
 			WARN_LOG(AUDIO, "Failed to set MM thread characteristics (Error: %lu).", error);
-			//SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 		}
 		else
 		{
 			INFO_LOG(AUDIO, "Set MM thread characteristics to Pro Audio.");
 		}
 
-
 		if (m_exclusive_mode)
 		{
 			// In event driven exclusive mode, GetCurrentPadding doesn't work and musn't be used; we're always given a buffer to fill completely.
 
 			u8 *data = nullptr;
+			HRESULT hr;
 
-			m_renderer->GetBuffer(frames_in_buffer, &data);
-			m_renderer->ReleaseBuffer(frames_in_buffer, AUDCLNT_BUFFERFLAGS_SILENT);
+			// Initial silent buffer prime
+			hr = m_renderer->GetBuffer(frames_in_buffer, &data);
+			if (SUCCEEDED(hr) && data != nullptr)
+			{
+				m_renderer->ReleaseBuffer(frames_in_buffer, AUDCLNT_BUFFERFLAGS_SILENT);
+			}
+			else
+			{
+				ERROR_LOG(AUDIO, "Exclusive mode: Initial GetBuffer for priming failed: HRESULT %s",
+				          wasapi_hresult_to_string(hr).c_str());
+				if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+					threadData = false; // Signal thread to stop
+			}
 
 			while (threadData.load())
 			{
@@ -469,7 +492,24 @@ void WASAPIStream::SoundLoop()
 				if (!threadData.load())
 					return;
 
-				m_renderer->GetBuffer(frames_in_buffer, &data);
+				hr = m_renderer->GetBuffer(frames_in_buffer, &data);
+				if (FAILED(hr))
+				{
+					ERROR_LOG(AUDIO, "Exclusive GetBuffer failed: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+					if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+					{
+						ERROR_LOG(AUDIO, "Audio device invalidated during exclusive GetBuffer. Stopping stream.");
+						threadData = false;
+					}
+					break;
+				}
+				if (data == nullptr)
+				{ // Should not happen if SUCCEEDED(hr)
+					ERROR_LOG(AUDIO, "Exclusive GetBuffer returned S_OK but data is nullptr. Stopping stream.");
+					threadData = false;
+					break;
+				}
+
 				m_mixer->Mix(reinterpret_cast<s16 *>(data), frames_in_buffer);
 
 				if (SConfig::GetInstance().m_mixAudioIn)
@@ -486,7 +526,11 @@ void WASAPIStream::SoundLoop()
 				// Since we're in exclusive mode we know we're the only stream so we could adjust the volume based on the volume set 
 				// within dolphin, on top of the windows one, and undo on exit, which would be ideal.
 
+
 				float volume = SConfig::GetInstance().m_IsMuted ? 0 : SConfig::GetInstance().m_Volume / 100.0f;
+				s16 *s16_data = reinterpret_cast<s16 *>(data);
+				for (u32 i = 0; i < frames_in_buffer * 2; i++) // Stereo
+					s16_data[i] = static_cast<s16>(s16_data[i] * volume);
 
 				for (u32 i = 0; i < frames_in_buffer * 2; i++)
 					reinterpret_cast<s16 *>(data)[i] = static_cast<s16>(reinterpret_cast<s16 *>(data)[i] * volume);
@@ -495,57 +539,9 @@ void WASAPIStream::SoundLoop()
 				                          Core::GetState() != Core::CORE_RUN ? AUDCLNT_BUFFERFLAGS_SILENT : 0);
 			}
 		}
-		else
+		else // Shared mode
 		{
 			HRESULT hr;
-
-			/* // Priming half the buffer with silent data
-			UINT32 initial_padding = 0;
-			hr = m_audio_client->GetCurrentPadding(&initial_padding);
-			if (SUCCEEDED(hr))
-			{
-				UINT32 initial_frames_available = frames_in_buffer - initial_padding;
-				if (initial_frames_available > 0)
-				{
-					// Let's only prime about half the buffer or less initially to get started quickly
-					UINT32 frames_to_render = initial_frames_available / 2; // Or some other reasonable starting amount
-					if (frames_to_render == 0 && initial_frames_available > 0)
-					{
-						frames_to_render = initial_frames_available; // Fill what's available if half is zero
-					}
-
-					if (frames_to_render > 0)
-					{
-						BYTE *pData = nullptr;
-						hr = m_renderer->GetBuffer(frames_to_render, &pData);
-						if (SUCCEEDED(hr) && pData != nullptr)
-						{
-							m_mixer->Mix(reinterpret_cast<s16 *>(pData), frames_to_render);
-							// Apply volume (consider refactoring volume application into the mixer or a helper)
-							float volume =
-							    SConfig::GetInstance().m_IsMuted ? 0 : SConfig::GetInstance().m_Volume / 100.0f;
-							for (UINT32 i = 0; i < frames_to_render * 2; ++i)
-							{
-								reinterpret_cast<s16 *>(pData)[i] =
-								    static_cast<s16>(reinterpret_cast<s16 *>(pData)[i] * volume);
-							}
-							m_renderer->ReleaseBuffer(frames_to_render, 0);
-							INFO_LOG(AUDIO, "Primed buffer with %u frames.", frames_to_render);
-						}
-						else
-						{
-							ERROR_LOG(AUDIO, "Initial GetBuffer failed: HRESULT %s, pData=%p",
-							          wasapi_hresult_to_string(hr).c_str(), pData);
-						}
-					}
-				}
-			}
-			else
-			{
-				ERROR_LOG(AUDIO, "Initial GetCurrentPadding failed: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-			}*/
-
-			// Overall loop: wait for event, check padding, get buffer, mix, release buffer
 			while (threadData.load())
 			{
 				// Wait for event
@@ -571,7 +567,6 @@ void WASAPIStream::SoundLoop()
 				// 'Padding' is the number of frames currently queued up in the buffer
 				UINT32 padding = 0;
 				hr = m_audio_client->GetCurrentPadding(&padding);
-
 				if (FAILED(hr))
 				{
 					ERROR_LOG(AUDIO, "GetCurrentPadding failed: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
@@ -580,12 +575,10 @@ void WASAPIStream::SoundLoop()
 						ERROR_LOG(AUDIO, "Audio device invalidated. Stopping stream.");
 						break;
 					}
-
 					continue; // No need to sleep since we wait for the event anyway
 				}
 
 				UINT32 frames_available = frames_in_buffer - padding;
-
 				if (frames_available == 0)
 				{
 					continue;
@@ -593,31 +586,21 @@ void WASAPIStream::SoundLoop()
 
 				BYTE *pData = nullptr;
 				hr = m_renderer->GetBuffer(frames_available, &pData);
-
 				if (FAILED(hr))
 				{
 					ERROR_LOG(AUDIO, "GetBuffer failed for %u frames: HRESULT %s", frames_available,
 					          wasapi_hresult_to_string(hr).c_str());
-
 					if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
 					{
 						ERROR_LOG(AUDIO, "Audio device invalidated during GetBuffer. Stopping stream.");
 						break;
 					}
-
-					Sleep(1);
 					continue;
 				}
-
-				// Check the pointer just in case, though a successful HRESULT should guarantee non-nullptr
 				if (pData == nullptr)
 				{
-					// This *shouldn't* happen if hr is S_OK. Log it aggressively if it does.
-					ERROR_LOG(AUDIO, "GetBuffer succeeded (HRESULT S_OK) but returned nullptr data pointer!");
-					// Release the (zero-sized?) buffer anyway to maintain state? The API is unclear here.
-					// Let's assume we shouldn't release if pData is null, maybe the state machine is broken.
-					// Maybe break the loop?
-					break; // Exit loop if state seems corrupted
+					ERROR_LOG(AUDIO, "GetBuffer succeeded but returned nullptr data pointer, aborting.");
+					break;
 				}
 
 				m_mixer->Mix(reinterpret_cast<s16 *>(pData), frames_available);
@@ -639,10 +622,8 @@ void WASAPIStream::SoundLoop()
 					if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
 					{
 						ERROR_LOG(AUDIO, "Audio device invalidated during ReleaseBuffer. Stopping stream.");
-						break; // Exit loop on invalidated device
 					}
-					// Other errors => break anyway
-					break;
+					break; // Exit loop on any ReleaseBuffer failure
 				}
 			}
 		}
@@ -657,26 +638,32 @@ void WASAPIStream::SoundLoop()
 
 void WASAPIStream::Stop()
 {
-	SoundStream::Stop();
+	SoundStream::Stop(); // This should signal threadData to false and join the SoundLoop thread
 
 	if(m_need_data_event)
+	{
 		CloseHandle(m_need_data_event);
-	if(m_audio_client)
-		m_audio_client->Stop();
-	if(m_renderer)
-		m_renderer->Release();
-	if(m_audio_client)
-		m_audio_client->Release();
+		m_need_data_event = nullptr;
+	}
 
-	m_need_data_event = nullptr;
-	m_renderer = nullptr;
-	m_audio_client = nullptr;
+	if (m_audio_client)
+		m_audio_client->Stop();
+
+	if (m_capture_audio_client)
+	{
+		m_capture_audio_client->Stop();
+	}
+
+	SAFE_RELEASE(m_renderer);
+	SAFE_RELEASE(m_capture_client);
+	SAFE_RELEASE(m_audio_client);
+	SAFE_RELEASE(m_capture_audio_client);
 }
 
 std::vector<std::string> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000_0001 audioDeviceMode)
 {
 	HRESULT hr = S_OK;
-	IMMDeviceEnumerator* mm_device_enumerator;
+	IMMDeviceEnumerator *mm_device_enumerator = nullptr;
 
 	hr = CoCreateInstance(
 		__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
@@ -698,8 +685,7 @@ std::vector<std::string> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		ERROR_LOG(AUDIO, "WASAPIStream: Error in GetAudioDevices @ EnumAudioEndpoints");
-
-		mm_device_enumerator->Release();
+		SAFE_RELEASE(mm_device_enumerator);
 		return {};
 	}
 
@@ -707,12 +693,12 @@ std::vector<std::string> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000
 	devices->GetCount(&device_count);
 
 	std::vector<std::string> results;
-	for(UINT i = 0; i < device_count; i++)
+	for (UINT i = 0; i < device_count; i++)
 	{
-		IMMDevice* device;
+		IMMDevice *device = nullptr;
 		devices->Item(i, &device);
 
-		IPropertyStore* pstore;
+		IPropertyStore *pstore = nullptr;
 		device->OpenPropertyStore(STGM_READ, &pstore);
 
 		PROPVARIANT name_prop;
@@ -728,25 +714,20 @@ std::vector<std::string> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000
 
 		std::string name_stdstr = name_cstr;
 
-		for(int i = 0; i <= 9; i++)
+		for (int j = 0; j <= 9; j++)
 		{
-			if(name_stdstr.substr(0, std::string("0 - ").size()) == std::to_string(i) + " - ")
-				name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(i) + "]";
+			if (name_stdstr.substr(0, std::string("0 - ").size()) == std::to_string(j) + " - ")
+				name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(j) + "]";
 		}
-
-		// if(name_stdstr.size() > 40)
-		//     name_stdstr = name_stdstr.substr(0, 40) + "...";
-		// needs to be preserved for uniqueness
-
 		results.push_back(name_stdstr);
-		PropVariantClear(&name_prop);
 
-		pstore->Release();
-		device->Release();
+		PropVariantClear(&name_prop);
+		SAFE_RELEASE(pstore);
+		SAFE_RELEASE(device);
 	}
 
-	devices->Release();
-	mm_device_enumerator->Release();
+	SAFE_RELEASE(devices);
+	SAFE_RELEASE(mm_device_enumerator);
 
 	return results;
 }
@@ -769,82 +750,85 @@ bool WASAPIStream::InitializeCaptureClient()
 	HRESULT hr;
 	IMMDeviceEnumerator* enumerator = nullptr;
 	hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
-	                      (void**)&enumerator);
+	                      (void **)&enumerator);
 	if (FAILED(hr))
 	{
-		ERROR_LOG(AUDIO, "Failed to create IMMDeviceEnumerator: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		ERROR_LOG(AUDIO, "Failed to create IMMDeviceEnumerator for capture: HRESULT %s",
+		          wasapi_hresult_to_string(hr).c_str());
 		return false;
 	}
 
-	IMMDevice* capture_device = nullptr;
-	std::string selected_device = SConfig::GetInstance().sAudioInputDevice;
+	IMMDevice *capture_device_ptr = nullptr; // Renamed to avoid confusion with class member
+	std::string selected_capture_device_name = SConfig::GetInstance().sAudioInputDevice;
 
-	IMMDeviceCollection* devices = nullptr;
+	IMMDeviceCollection *devices = nullptr;
 	hr = enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &devices);
 	if (FAILED(hr))
 	{
-		ERROR_LOG(AUDIO, "Failed to enumerate audio endpoints: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-		enumerator->Release();
+		ERROR_LOG(AUDIO, "Failed to enumerate audio capture endpoints: HRESULT %s",
+		          wasapi_hresult_to_string(hr).c_str());
+		SAFE_RELEASE(enumerator);
 		return false;
 	}
 
-	DEBUG_LOG(AUDIO, "Selected capture device: %s", selected_device.c_str());
+	DEBUG_LOG(AUDIO, "Selected capture device: %s", selected_capture_device_name.c_str());
 	UINT count;
 	devices->GetCount(&count);
 	for (UINT i = 0; i < count; ++i)
 	{
-		IMMDevice* device = nullptr;
-		devices->Item(i, &device);
+		IMMDevice *device_item = nullptr;
+		devices->Item(i, &device_item);
 
-		IPropertyStore* store = nullptr;
-		device->OpenPropertyStore(STGM_READ, &store);
+		IPropertyStore *store = nullptr;
+		device_item->OpenPropertyStore(STGM_READ, &store);
 
-		PROPVARIANT name;
-		PropVariantInit(&name);
-		store->GetValue(PKEY_Device_FriendlyName, &name);
+		PROPVARIANT name_prop; // Renamed to avoid conflict
+		PropVariantInit(&name_prop);
+		store->GetValue(PKEY_Device_FriendlyName, &name_prop);
 
 		char name_cstr[2048];
-		size_t ret;
+		size_t ret_capture_name; // Renamed
 
-		ret = wcstombs(name_cstr, name.pwszVal, sizeof(name_cstr));
-		if (ret == 2048)
+		ret_capture_name = wcstombs(name_cstr, name_prop.pwszVal, sizeof(name_cstr));
+		if (ret_capture_name == 2048)
 			name_cstr[2047] = '\0';
 
 		std::string name_stdstr = name_cstr;
 
-		for (int i = 0; i <= 9; i++)
+		for (int j = 0; j <= 9; j++)
 		{
-			if (name_stdstr.substr(0, std::string("0 - ").size()) == std::to_string(i) + " - ")
-				name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(i) + "]";
+			if (name_stdstr.substr(0, std::string("0 - ").size()) == std::to_string(j) + " - ")
+				name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(j) + "]";
 		}
 
 		DEBUG_LOG(AUDIO, "Checking capture device: %s", name_stdstr.c_str());
-		if (name_stdstr == selected_device)
+		if (name_stdstr == selected_capture_device_name)
 		{
-			capture_device = device;
+			capture_device_ptr = device_item; // Assign, will be released later
 			INFO_LOG(AUDIO, "Found matching capture device: %s", name_stdstr.c_str());
 		}
 
-		PropVariantClear(&name);
-		store->Release();
-		if (capture_device != device)
-			device->Release();
+		PropVariantClear(&name_prop);
+		SAFE_RELEASE(store);
+		if (capture_device_ptr != device_item)
+			SAFE_RELEASE(device_item);
 	}
-	devices->Release();
+	SAFE_RELEASE(devices);
 
-	if (!capture_device)
+	if (!capture_device_ptr)
 	{
-		ERROR_LOG(AUDIO, "Selected capture device not found: %s", selected_device.c_str());
-		enumerator->Release();
+		ERROR_LOG(AUDIO, "Selected capture device not found: %s", selected_capture_device_name.c_str());
+		SAFE_RELEASE(enumerator);
 		return false;
 	}
 
-	hr = capture_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&m_capture_audio_client);
+	hr = capture_device_ptr->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void **)&m_capture_audio_client);
 	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "Failed to activate capture device: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-		capture_device->Release();
-		enumerator->Release();
+		SAFE_RELEASE(capture_device_ptr);
+		SAFE_RELEASE(enumerator);
+		// m_capture_audio_client is not valid
 		return false;
 	}
 
@@ -855,18 +839,17 @@ bool WASAPIStream::InitializeCaptureClient()
 	captureFormat.Format.nAvgBytesPerSec = captureFormat.Format.nSamplesPerSec * 4;
 	captureFormat.Format.nBlockAlign = 4;
 	captureFormat.Format.wBitsPerSample = 16;
-
 	captureFormat.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
-
 	captureFormat.Samples.wValidBitsPerSample = captureFormat.Format.wBitsPerSample;
 	captureFormat.dwChannelMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
 	captureFormat.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
 
-	auto format = reinterpret_cast<WAVEFORMATEX *>(&captureFormat);
+	auto capture_format_ptr = reinterpret_cast<WAVEFORMATEX *>(&captureFormat);
 
 	// Require 16bits 48000hz PCM from the capture device (the capture device may not support it,
 	// but because we use shared mode, the mixer translation layer will handle that)
-	hr = m_capture_audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 0, 0, format, nullptr);
+	hr = m_capture_audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 0, 0, capture_format_ptr, nullptr);
+	
 	if (FAILED(hr))
 	{
 		if (hr == AUDCLNT_E_UNSUPPORTED_FORMAT)
@@ -877,79 +860,126 @@ bool WASAPIStream::InitializeCaptureClient()
 		{
 			ERROR_LOG(AUDIO, "Failed to initialize capture client: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		}
-		capture_device->Release();
-		enumerator->Release();
+		SAFE_RELEASE(m_capture_audio_client);
+		SAFE_RELEASE(capture_device_ptr);
+		SAFE_RELEASE(enumerator);
 		return false;
 	}
 
-	hr = m_capture_audio_client->GetService(__uuidof(IAudioCaptureClient), (void**)&m_capture_client);
+	hr = m_capture_audio_client->GetService(__uuidof(IAudioCaptureClient), (void **)&m_capture_client);
 	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "Failed to get IAudioCaptureClient service: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-		capture_device->Release();
-		enumerator->Release();
+		SAFE_RELEASE(m_capture_audio_client);
+		SAFE_RELEASE(capture_device_ptr);
+		SAFE_RELEASE(enumerator);
 		return false;
 	}
 
-	capture_device->Release();
-	enumerator->Release();
+	hr = m_capture_audio_client->Start();
+	if (FAILED(hr))
+	{
+		ERROR_LOG(AUDIO, "Failed to start capture client: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		SAFE_RELEASE(m_capture_client);
+		SAFE_RELEASE(m_capture_audio_client);
+		SAFE_RELEASE(capture_device_ptr);
+		SAFE_RELEASE(enumerator);
+		return false;
+	}
+
+	SAFE_RELEASE(capture_device_ptr);
+	SAFE_RELEASE(enumerator);
 	return true;
 }
 
-void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples)
+void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples_to_render)
 {
-	if (!m_capture_client || !SConfig::GetInstance().m_mixAudioIn)
+	if (!m_capture_client || !SConfig::GetInstance().m_mixAudioIn || !m_capture_audio_client)
 		return;
 
 	// Overall mix = (mix_buffer + captured audio) / 2
 	// Always halve the mix buffer even if we can't get captured audio so whether we get captured audio doesn't change perceived volume
-	for (u32 i = 0; i < num_samples * 2; ++i)
+	for (u32 i = 0; i < num_samples_to_render * 2; ++i) // Stereo
 		mix_buffer[i] = mix_buffer[i] / 2;
-	
+
 	UINT32 packet_length = 0;
 	HRESULT hr = m_capture_client->GetNextPacketSize(&packet_length);
 	if (FAILED(hr))
 	{
-		ERROR_LOG(AUDIO, "Failed to get next packet size: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		ERROR_LOG(AUDIO, "Capture: Failed to get next packet size: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+		{
+			WARN_LOG(AUDIO, "Capture device invalidated. Disabling further capture for this session.");
+			SAFE_RELEASE(m_capture_client);
+		}
 		return;
 	}
 
 	while (packet_length > 0)
 	{
-		BYTE* data;
-		UINT32 num_frames;
+		BYTE *captured_data_ptr;    // Renamed
+		UINT32 num_frames_captured; // Renamed
 		DWORD flags;
-		hr = m_capture_client->GetBuffer(&data, &num_frames, &flags, nullptr, nullptr);
+
+		//TODO We only want to consume at most num_samples_to_render
+		// Here it looks like we capture all the frames, and let them know we consumed all of them in ReleaseBuffer
+		hr = m_capture_client->GetBuffer(&captured_data_ptr, &num_frames_captured, &flags, nullptr, nullptr);
 		if (FAILED(hr))
 		{
-			ERROR_LOG(AUDIO, "Failed to get buffer: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			ERROR_LOG(AUDIO, "Capture: Failed to get buffer: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+			{
+				WARN_LOG(AUDIO, "Capture device invalidated during GetBuffer. Disabling further capture.");
+				SAFE_RELEASE(m_capture_client);
+			}
 			return;
 		}
 
 		if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
 		{
-			//INFO_LOG(AUDIO, "Silent audio buffer received from audio in device.");
+			// INFO_LOG(AUDIO, "Silent audio buffer received from audio in device for %u frames.", num_frames_captured);
 		}
-		else
+		else if (captured_data_ptr != nullptr)
 		{
-			s16* s16_data = reinterpret_cast<s16*>(data);
-			for (UINT32 i = 0; i < num_frames * 2 && i < num_samples * 2; ++i)
+			s16 *s16_captured_data = reinterpret_cast<s16 *>(captured_data_ptr);
+			// Mix captured data, careful not to write past mix_buffer
+			// num_frames_captured is in frames, num_samples_to_render is also in frames.
+			// Each frame has 2 s16 samples (stereo).
+			UINT32 samples_to_mix = num_frames_captured * 2; // Number of s16 samples
+			if (samples_to_mix > num_samples_to_render * 2)
 			{
-				mix_buffer[i] += s16_data[i] / 2;
+				samples_to_mix = num_samples_to_render * 2; // Don't overflow render buffer
+			}
+
+			for (UINT32 i = 0; i < samples_to_mix; ++i)
+			{
+				// Add captured audio (also halved) to the already halved mix_buffer
+				mix_buffer[i] += s16_captured_data[i] / 2;
 			}
 		}
 
-		hr = m_capture_client->ReleaseBuffer(num_frames);
+		hr = m_capture_client->ReleaseBuffer(num_frames_captured);
 		if (FAILED(hr))
 		{
-			ERROR_LOG(AUDIO, "Failed to release buffer: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			ERROR_LOG(AUDIO, "Capture: Failed to release buffer: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+			{
+				WARN_LOG(AUDIO, "Capture device invalidated during ReleaseBuffer. Disabling further capture.");
+				SAFE_RELEASE(m_capture_client);
+			}
 			return;
 		}
 
 		hr = m_capture_client->GetNextPacketSize(&packet_length);
 		if (FAILED(hr))
 		{
-			ERROR_LOG(AUDIO, "Failed to get next packet size: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			ERROR_LOG(AUDIO, "Capture: Failed to get next packet size (loop): HRESULT %s",
+			          wasapi_hresult_to_string(hr).c_str());
+			if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+			{
+				WARN_LOG(AUDIO, "Capture device invalidated. Disabling further capture.");
+				SAFE_RELEASE(m_capture_client);
+			}
 			return;
 		}
 	}
