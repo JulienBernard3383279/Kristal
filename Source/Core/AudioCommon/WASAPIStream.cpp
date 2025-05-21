@@ -512,11 +512,6 @@ void WASAPIStream::SoundLoop()
 
 				m_mixer->Mix(reinterpret_cast<s16 *>(data), frames_in_buffer);
 
-				if (SConfig::GetInstance().m_mixAudioIn)
-				{
-					CaptureAudioAndMix(reinterpret_cast<s16 *>(data), frames_in_buffer);
-				}
-
 				// Ideally we should not make a smaller signal by applying the volume here, in exclusive mode.
 				// We should be sending to the device the volume we want, provided it supports volume adjustment, and send a full range signal.
 				// The audio level set in windows does that, but any volume adjustment done by apps e.g. here or by chrome, will lower the signal.
@@ -526,11 +521,17 @@ void WASAPIStream::SoundLoop()
 				// Since we're in exclusive mode we know we're the only stream so we could adjust the volume based on the volume set 
 				// within dolphin, on top of the windows one, and undo on exit, which would be ideal.
 
-
 				float volume = SConfig::GetInstance().m_IsMuted ? 0 : SConfig::GetInstance().m_Volume / 100.0f;
 				s16 *s16_data = reinterpret_cast<s16 *>(data);
 				for (u32 i = 0; i < frames_in_buffer * 2; i++) // Stereo
 					s16_data[i] = static_cast<s16>(s16_data[i] * volume);
+
+				// Note that Dolphin audio volume doesn't impact pass-through audio.
+				// Pass-through audio volume is controlled by the Windows mixer directly
+				if (SConfig::GetInstance().m_mixAudioIn)
+				{
+					CaptureAudioAndMix(reinterpret_cast<s16 *>(data), frames_in_buffer);
+				}
 
 				m_renderer->ReleaseBuffer(frames_in_buffer,
 				                          Core::GetState() != Core::CORE_RUN ? AUDCLNT_BUFFERFLAGS_SILENT : 0);
