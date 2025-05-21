@@ -472,6 +472,11 @@ void WASAPIStream::SoundLoop()
 				m_renderer->GetBuffer(frames_in_buffer, &data);
 				m_mixer->Mix(reinterpret_cast<s16 *>(data), frames_in_buffer);
 
+				if (SConfig::GetInstance().m_mixAudioIn)
+				{
+					CaptureAudioAndMix(reinterpret_cast<s16 *>(data), frames_in_buffer);
+				}
+
 				// Ideally we should not make a smaller signal by applying the volume here, in exclusive mode.
 				// We should be sending to the device the volume we want, provided it supports volume adjustment, and send a full range signal.
 				// The audio level set in windows does that, but any volume adjustment done by apps e.g. here or by chrome, will lower the signal.
@@ -766,19 +771,24 @@ bool WASAPIStream::InitializeCaptureClient()
 	hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
 	                      (void**)&enumerator);
 	if (FAILED(hr))
+	{
+		ERROR_LOG(AUDIO, "Failed to create IMMDeviceEnumerator: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		return false;
+	}
 
 	IMMDevice* capture_device = nullptr;
 	std::string selected_device = SConfig::GetInstance().sAudioInputDevice;
-	
+
 	IMMDeviceCollection* devices = nullptr;
 	hr = enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &devices);
 	if (FAILED(hr))
 	{
+		ERROR_LOG(AUDIO, "Failed to enumerate audio endpoints: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		enumerator->Release();
 		return false;
 	}
 
+	DEBUG_LOG(AUDIO, "Selected capture device: %s", selected_device.c_str());
 	UINT count;
 	devices->GetCount(&count);
 	for (UINT i = 0; i < count; ++i)
@@ -808,8 +818,12 @@ bool WASAPIStream::InitializeCaptureClient()
 				name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(i) + "]";
 		}
 
-		if (name_stdstr == m_selected_device)
+		DEBUG_LOG(AUDIO, "Checking capture device: %s", name_stdstr.c_str());
+		if (name_stdstr == selected_device)
+		{
 			capture_device = device;
+			INFO_LOG(AUDIO, "Found matching capture device: %s", name_stdstr.c_str());
+		}
 
 		PropVariantClear(&name);
 		store->Release();
@@ -820,6 +834,7 @@ bool WASAPIStream::InitializeCaptureClient()
 
 	if (!capture_device)
 	{
+		ERROR_LOG(AUDIO, "Selected capture device not found: %s", selected_device.c_str());
 		enumerator->Release();
 		return false;
 	}
@@ -827,60 +842,115 @@ bool WASAPIStream::InitializeCaptureClient()
 	hr = capture_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&m_capture_audio_client);
 	if (FAILED(hr))
 	{
+		ERROR_LOG(AUDIO, "Failed to activate capture device: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		capture_device->Release();
 		enumerator->Release();
 		return false;
 	}
 
-	WAVEFORMATEX* format = nullptr;
-	hr = m_capture_audio_client->GetMixFormat(&format);
-	if (FAILED(hr))
-	{
-		capture_device->Release();
-		enumerator->Release();
-		return false;
-	}
+	captureFormat = {0};
+	captureFormat.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+	captureFormat.Format.nChannels = 2;
+	captureFormat.Format.nSamplesPerSec = 48000;
+	captureFormat.Format.nAvgBytesPerSec = captureFormat.Format.nSamplesPerSec * 4;
+	captureFormat.Format.nBlockAlign = 4;
+	captureFormat.Format.wBitsPerSample = 16;
 
+	captureFormat.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+
+	captureFormat.Samples.wValidBitsPerSample = captureFormat.Format.wBitsPerSample;
+	captureFormat.dwChannelMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
+	captureFormat.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+
+	auto format = reinterpret_cast<WAVEFORMATEX *>(&captureFormat);
+
+	// Require 16bits 48000hz PCM from the capture device (the capture device may not support it,
+	// but because we use shared mode, the mixer translation layer will handle that)
 	hr = m_capture_audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 0, 0, format, nullptr);
 	if (FAILED(hr))
 	{
-		CoTaskMemFree(format);
+		if (hr == AUDCLNT_E_UNSUPPORTED_FORMAT)
+		{
+			ERROR_LOG(AUDIO, "Error - capture device doesn't support the required stereo 16-bit 48000 Hz PCM format.");
+		}
+		else
+		{
+			ERROR_LOG(AUDIO, "Failed to initialize capture client: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		}
 		capture_device->Release();
 		enumerator->Release();
 		return false;
 	}
 
 	hr = m_capture_audio_client->GetService(__uuidof(IAudioCaptureClient), (void**)&m_capture_client);
-	CoTaskMemFree(format);
+	if (FAILED(hr))
+	{
+		ERROR_LOG(AUDIO, "Failed to get IAudioCaptureClient service: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		capture_device->Release();
+		enumerator->Release();
+		return false;
+	}
+
 	capture_device->Release();
 	enumerator->Release();
-	return SUCCEEDED(hr);
+	return true;
 }
 
-//TODO Since we call this from event driven, we should just ask for the number of samples we need to mix
-void WASAPIStream::CaptureAudio(float* mix_buffer, u32 num_samples)
+void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples)
 {
 	if (!m_capture_client || !SConfig::GetInstance().m_mixAudioIn)
 		return;
 
+	// Overall mix = (mix_buffer + captured audio) / 2
+	// Always halve the mix buffer even if we can't get captured audio so whether we get captured audio doesn't change perceived volume
+	for (u32 i = 0; i < num_samples * 2; ++i)
+		mix_buffer[i] = mix_buffer[i] / 2;
+	
 	UINT32 packet_length = 0;
-	m_capture_client->GetNextPacketSize(&packet_length);
+	HRESULT hr = m_capture_client->GetNextPacketSize(&packet_length);
+	if (FAILED(hr))
+	{
+		ERROR_LOG(AUDIO, "Failed to get next packet size: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		return;
+	}
 
 	while (packet_length > 0)
 	{
 		BYTE* data;
 		UINT32 num_frames;
 		DWORD flags;
-		m_capture_client->GetBuffer(&data, &num_frames, &flags, nullptr, nullptr);
-
-		float* float_data = reinterpret_cast<float*>(data);
-		for (UINT32 i = 0; i < num_frames * 2 && i < num_samples * 2; ++i)
+		hr = m_capture_client->GetBuffer(&data, &num_frames, &flags, nullptr, nullptr);
+		if (FAILED(hr))
 		{
-			mix_buffer[i] += float_data[i];
+			ERROR_LOG(AUDIO, "Failed to get buffer: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			return;
 		}
 
-		m_capture_client->ReleaseBuffer(num_frames);
-		m_capture_client->GetNextPacketSize(&packet_length);
+		if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
+		{
+			//INFO_LOG(AUDIO, "Silent audio buffer received from audio in device.");
+		}
+		else
+		{
+			s16* s16_data = reinterpret_cast<s16*>(data);
+			for (UINT32 i = 0; i < num_frames * 2 && i < num_samples * 2; ++i)
+			{
+				mix_buffer[i] += s16_data[i] / 2;
+			}
+		}
+
+		hr = m_capture_client->ReleaseBuffer(num_frames);
+		if (FAILED(hr))
+		{
+			ERROR_LOG(AUDIO, "Failed to release buffer: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			return;
+		}
+
+		hr = m_capture_client->GetNextPacketSize(&packet_length);
+		if (FAILED(hr))
+		{
+			ERROR_LOG(AUDIO, "Failed to get next packet size: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			return;
+		}
 	}
 }
-//TODO: Handle jukebox (ignore this line)
