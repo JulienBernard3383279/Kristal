@@ -769,7 +769,9 @@ bool WASAPIStream::InitializeCaptureClient()
 	}
 
 	IMMDevice *capture_device_ptr = nullptr; // Renamed to avoid confusion with class member
-	std::string selected_capture_device_name = SConfig::GetInstance().sAudioInputDevice;
+	std::string selected_device_name = m_audioCaptureType == AudioCaptureType::Recording
+	                                               ? SConfig::GetInstance().sAudioInputDevice
+	                                               : SConfig::GetInstance().sAudioLoopedBackOutputDevice;
 
 	IMMDeviceCollection *devices = nullptr;
 	hr = enumerator->EnumAudioEndpoints(
@@ -782,7 +784,8 @@ bool WASAPIStream::InitializeCaptureClient()
 		return false;
 	}
 
-	DEBUG_LOG(AUDIO, "Selected capture device: %s", selected_capture_device_name.c_str());
+	DEBUG_LOG(AUDIO, (m_audioCaptureType == AudioCaptureType::Recording ? "Selected capture device: %s" : "Selected loopback device: %s"),
+	          selected_device_name.c_str());
 	UINT count;
 	devices->GetCount(&count);
 	for (UINT i = 0; i < count; ++i)
@@ -812,11 +815,11 @@ bool WASAPIStream::InitializeCaptureClient()
 				name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(j) + "]";
 		}
 
-		DEBUG_LOG(AUDIO, "Checking capture device: %s", name_stdstr.c_str());
-		if (name_stdstr == selected_capture_device_name)
+		DEBUG_LOG(AUDIO, "Checking device: %s", name_stdstr.c_str());
+		if (name_stdstr == selected_device_name)
 		{
 			capture_device_ptr = device_item; // Assign, will be released later
-			INFO_LOG(AUDIO, "Found matching capture device: %s", name_stdstr.c_str());
+			INFO_LOG(AUDIO, "Found matching device: %s", name_stdstr.c_str());
 		}
 
 		PropVariantClear(&name_prop);
@@ -828,7 +831,7 @@ bool WASAPIStream::InitializeCaptureClient()
 
 	if (!capture_device_ptr)
 	{
-		ERROR_LOG(AUDIO, "Selected capture device not found: %s", selected_capture_device_name.c_str());
+		ERROR_LOG(AUDIO, "Selected device not found: %s", selected_device_name.c_str());
 		SAFE_RELEASE(enumerator);
 		return false;
 	}
@@ -836,7 +839,7 @@ bool WASAPIStream::InitializeCaptureClient()
 	hr = capture_device_ptr->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void **)&m_capture_audio_client);
 	if (FAILED(hr))
 	{
-		ERROR_LOG(AUDIO, "Failed to activate capture device: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		ERROR_LOG(AUDIO, "Failed to activate device: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		SAFE_RELEASE(capture_device_ptr);
 		SAFE_RELEASE(enumerator);
 		// m_capture_audio_client is not valid

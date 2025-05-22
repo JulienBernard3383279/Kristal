@@ -107,11 +107,11 @@ void AudioConfigPane::InitializeGUI()
 	backend_grid_sizer->Add(m_audio_latency_label, wxGBPosition(2, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_audio_latency_spinctrl, wxGBPosition(2, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_mix_recorded_audio_checkbox, wxGBPosition(3, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
-	backend_grid_sizer->Add(new wxStaticText(this, wxID_ANY, _("Input Device:")), wxGBPosition(4, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(new wxStaticText(this, wxID_ANY, _("Input device:")), wxGBPosition(4, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_audio_recording_device_choice, wxGBPosition(4, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
-	backend_grid_sizer->Add(m_mix_looped_back_audio_checkbox, wxGBPosition(3, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
-	backend_grid_sizer->Add(new wxStaticText(this, wxID_ANY, _("Looped-back Output Device:")), wxGBPosition(4, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
-	backend_grid_sizer->Add(m_audio_loopback_device_choice, wxGBPosition(4, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(m_mix_looped_back_audio_checkbox, wxGBPosition(5, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(new wxStaticText(this, wxID_ANY, _("Looped-back output device:")), wxGBPosition(6, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(m_audio_loopback_device_choice, wxGBPosition(6, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 
 	wxStaticBoxSizer *const backend_static_box_sizer = new wxStaticBoxSizer(wxVERTICAL, this, _("Backend Settings"));
 	backend_static_box_sizer->AddSpacer(space5);
@@ -261,6 +261,7 @@ void AudioConfigPane::OnLatencySpinCtrlChanged(wxCommandEvent &event)
 
 void AudioConfigPane::OnMixRecordedAudioCheckBoxChanged(bool checked) {
 	m_audio_recording_device_choice->Enable(checked);
+	m_audio_recording_device_choice->Refresh();
 	SConfig::GetInstance().m_mixRecordedAudioIn = checked;
 	if (checked)
 	{
@@ -277,12 +278,13 @@ void AudioConfigPane::OnMixRecordedAudioCheckBoxChanged(wxCommandEvent &event)
 void AudioConfigPane::OnMixLoopedBackAudioCheckBoxChanged(bool checked)
 {
 	m_audio_loopback_device_choice->Enable(checked);
+	m_audio_loopback_device_choice->Refresh();
 	SConfig::GetInstance().m_mixLoopedBackAudioIn = checked;
 	if (checked)
 	{
 		m_mix_recorded_audio_checkbox->SetValue(false);
 		m_mix_recorded_audio_checkbox->Refresh();
-		OnMixLoopedBackAudioCheckBoxChanged(false);
+		OnMixRecordedAudioCheckBoxChanged(false);
 	}
 }
 void AudioConfigPane::OnMixLoopedBackAudioCheckBoxChanged(wxCommandEvent &event)
