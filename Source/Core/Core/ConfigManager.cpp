@@ -353,8 +353,10 @@ void SConfig::SaveDSPSettings(IniFile &ini)
 	dsp->Set("DumpAudioSilent", m_DumpAudioSilent);
 	dsp->Set("DumpUCode", m_DumpUCode);
 	dsp->Set("Backend", sBackend);
-	dsp->Set("MixAudioIn", m_mixAudioIn);
+	dsp->Set("MixAudioIn", m_mixRecordedAudioIn);
 	dsp->Set("AudioInputDevice", sAudioInputDevice);
+	dsp->Set("MixLoopedBackAudioIn", m_mixLoopedBackAudioIn);
+	dsp->Set("AudioLoopedBackOutputDevice", sAudioLoopedBackOutputDevice);
 	dsp->Set("Volume", m_Volume);
 	dsp->Set("CaptureLog", m_DSPCaptureLog);
 }
@@ -739,8 +741,10 @@ void SConfig::LoadDSPSettings(IniFile &ini)
 #endif
 	dsp->Get("Volume", &m_Volume, 25);
 	dsp->Get("CaptureLog", &m_DSPCaptureLog, false);
-	dsp->Get("MixAudioIn", &m_mixAudioIn);
+	dsp->Get("MixAudioIn", &m_mixRecordedAudioIn);
 	dsp->Get("AudioInputDevice", &sAudioInputDevice);
+	dsp->Get("MixLoopedBackAudioIn", &m_mixLoopedBackAudioIn);
+	dsp->Get("AudioLoopedBackOutputDevice", &sAudioLoopedBackOutputDevice);
 
 	// fix 5.8b style setting
 	if (sBackend == "Exclusive-mode WASAPI")

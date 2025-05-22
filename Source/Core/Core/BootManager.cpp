@@ -90,8 +90,11 @@ private:
 	float m_OCFactor;
 	std::string strBackend;
 	std::string sBackend;
-	bool bMixAudioIn;
+	bool bMixRecordedAudioIn;
 	std::string sAudioInputDevice;
+	bool bMixLoopedBackAudioIn;
+	std::string sAudioLoopedBackOutputDevice;
+
 	std::string m_strGPUDeterminismMode;
 	std::array<int, MAX_BBMOTES> iWiimoteSource;
 	std::array<SIDevices, MAX_SI_CHANNELS> Pads;
@@ -122,8 +125,10 @@ void ConfigCache::SaveConfig(const SConfig& config)
 	m_EmulationSpeed = config.m_EmulationSpeed;
 	strBackend = config.m_strVideoBackend;
 	sBackend = config.sBackend;
-	bMixAudioIn = config.m_mixAudioIn;
+	bMixRecordedAudioIn = config.m_mixRecordedAudioIn;
 	sAudioInputDevice = config.sAudioInputDevice;
+	bMixLoopedBackAudioIn = config.m_mixLoopedBackAudioIn;
+	sAudioLoopedBackOutputDevice = config.sAudioLoopedBackOutputDevice;
 
 	m_strGPUDeterminismMode = config.m_strGPUDeterminismMode;
 	iVideoRate = config.iVideoRate;
@@ -208,8 +213,11 @@ void ConfigCache::RestoreConfig(SConfig* config)
 
 	config->m_strVideoBackend = strBackend;
 	config->sBackend = sBackend;
-	config->m_mixAudioIn = bMixAudioIn;
+	config->m_mixRecordedAudioIn = bMixRecordedAudioIn;
 	config->sAudioInputDevice = sAudioInputDevice;
+	config->m_mixLoopedBackAudioIn = bMixLoopedBackAudioIn;
+	config->sAudioLoopedBackOutputDevice = sAudioLoopedBackOutputDevice;
+
 	config->m_strGPUDeterminismMode = m_strGPUDeterminismMode;
 	VideoBackendBase::ActivateBackend(config->m_strVideoBackend);
 }
@@ -309,9 +317,11 @@ bool BootCore(const std::string& _rFilename)
 		dsp_section->Get("EnableJIT", &SConfig::GetInstance().m_DSPEnableJIT,
 			SConfig::GetInstance().m_DSPEnableJIT);
 		dsp_section->Get("Backend", &SConfig::GetInstance().sBackend, SConfig::GetInstance().sBackend);
-		dsp_section->Get("MixAudioIn", &SConfig::GetInstance().m_mixAudioIn, SConfig::GetInstance().m_mixAudioIn);
-		dsp_section->Get("AudioInputDevice", &SConfig::GetInstance().sAudioInputDevice,
-		                 SConfig::GetInstance().sAudioInputDevice);
+		dsp_section->Get("MixRecordedAudioIn", &SConfig::GetInstance().m_mixRecordedAudioIn, SConfig::GetInstance().m_mixRecordedAudioIn);
+		dsp_section->Get("AudioInputDevice", &SConfig::GetInstance().sAudioInputDevice, SConfig::GetInstance().sAudioInputDevice);
+		dsp_section->Get("MixLoopedBackAudioIn", &SConfig::GetInstance().m_mixLoopedBackAudioIn, SConfig::GetInstance().m_mixLoopedBackAudioIn);
+		dsp_section->Get("AudioLoopedBackOutputDevice", &SConfig::GetInstance().sAudioLoopedBackOutputDevice, SConfig::GetInstance().sAudioLoopedBackOutputDevice);
+
 		VideoBackendBase::ActivateBackend(StartUp.m_strVideoBackend);
 		core_section->Get("GPUDeterminismMode", &StartUp.m_strGPUDeterminismMode,
 			StartUp.m_strGPUDeterminismMode);

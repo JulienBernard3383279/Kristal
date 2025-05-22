@@ -18,10 +18,7 @@ class WASAPIStream final : public SoundStream
 {
 #ifdef _WIN32
 public:
-	WASAPIStream(bool exclusive_mode, std::string device = "Default") : m_exclusive_mode(exclusive_mode), m_selected_device(device)
-	{
-		CoInitialize(nullptr);
-	}
+	WASAPIStream(bool exclusive_mode, std::string device = "Default");
 
 	~WASAPIStream()
 	{
@@ -62,6 +59,13 @@ public:
 
 	bool m_exclusive_mode;
 
+	enum class AudioCaptureType
+	{
+		None,
+		Recording,
+		Loopback,
+	};
+	AudioCaptureType m_audioCaptureType;
 	std::deque<s16> m_internal_capture_buffer;
 	bool InitializeCaptureClient();
 	WAVEFORMATEXTENSIBLE captureFormat;

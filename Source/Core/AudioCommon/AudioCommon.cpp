@@ -148,6 +148,10 @@ std::vector<std::string> GetAudioInputDeviceNames() {
 	return WASAPIStream::GetCaptureDeviceNames();
 }
 
+std::vector<std::string> GetAudioOutputDeviceNames() {
+	return WASAPIStream::GetRenderDeviceNames();
+}
+
 bool SupportsDPL2Decoder(const std::string &backend)
 {
 #ifndef __APPLE__

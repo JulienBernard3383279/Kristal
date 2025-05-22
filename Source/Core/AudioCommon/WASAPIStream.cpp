@@ -13,6 +13,15 @@
 #include <locale>
 #include <sstream> // Required for ostringstream
 
+WASAPIStream::WASAPIStream(bool exclusive_mode, std::string device)
+    : m_exclusive_mode(exclusive_mode)
+    , m_selected_device(device)
+    , m_audioCaptureType(SConfig::GetInstance().m_mixLoopedBackAudioIn ? AudioCaptureType::Loopback :
+                         SConfig::GetInstance().m_mixRecordedAudioIn ? AudioCaptureType::Recording : AudioCaptureType::None)
+{
+	CoInitialize(nullptr);
+}
+
 static std::string wasapi_hresult_to_string(HRESULT res)
 {
 	switch (res)
@@ -297,7 +306,7 @@ bool WASAPIStream::Start()
 			                                exclusive_device_period, format_ptr, nullptr);
 		}
 
-		if (SUCCEEDED(hr) && SConfig::GetInstance().m_mixAudioIn)
+		if (SUCCEEDED(hr) && m_audioCaptureType != AudioCaptureType::None)
 		{
 			if (!InitializeCaptureClient())
 			{
@@ -367,7 +376,7 @@ bool WASAPIStream::Start()
 	auto cleanUpAudioClients = [&](bool stopCaptureClient = true)
 	{
 		SAFE_RELEASE(m_audio_client);
-		if (m_exclusive_mode && SConfig::GetInstance().m_mixAudioIn && m_capture_audio_client)
+		if (m_exclusive_mode && m_audioCaptureType != AudioCaptureType::None && m_capture_audio_client)
 		{
 			m_capture_audio_client->Stop();
 			SAFE_RELEASE(m_capture_client);
@@ -531,7 +540,7 @@ void WASAPIStream::SoundLoop()
 				// However it does halve it, which is somewhat questionable for fluidity. Perhaps when we add a
 				// feature to auto-switch from normal output to the pass-through endpoint on 
 				// Dolphin start-up, we should also set that endpoint's volume to normal output + 6dB
-				if (SConfig::GetInstance().m_mixAudioIn)
+				if (m_audioCaptureType != AudioCaptureType::None)
 				{
 					CaptureAudioAndMix(reinterpret_cast<s16 *>(data), frames_in_buffer);
 				}
@@ -745,7 +754,7 @@ std::vector<std::string> WASAPIStream::GetCaptureDeviceNames()
 
 bool WASAPIStream::InitializeCaptureClient()
 {
-	if (!m_exclusive_mode || !SConfig::GetInstance().m_mixAudioIn)
+	if (!m_exclusive_mode || m_audioCaptureType == AudioCaptureType::None)
 		return true;
 
 	HRESULT hr;
@@ -763,7 +772,8 @@ bool WASAPIStream::InitializeCaptureClient()
 	std::string selected_capture_device_name = SConfig::GetInstance().sAudioInputDevice;
 
 	IMMDeviceCollection *devices = nullptr;
-	hr = enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &devices);
+	hr = enumerator->EnumAudioEndpoints(
+		m_audioCaptureType == AudioCaptureType::Recording ? eCapture : eRender, DEVICE_STATE_ACTIVE, &devices);
 	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "Failed to enumerate audio capture endpoints: HRESULT %s",
@@ -849,13 +859,14 @@ bool WASAPIStream::InitializeCaptureClient()
 
 	// Require 16bits 48000hz PCM from the capture device (the capture device may not support it,
 	// but because we use shared mode, the mixer translation layer will handle that)
-	hr = m_capture_audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 0, 0, capture_format_ptr, nullptr);
+	DWORD dwStreamFlags = m_audioCaptureType == AudioCaptureType::Recording ? 0 : AUDCLNT_STREAMFLAGS_LOOPBACK;
+	hr = m_capture_audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, dwStreamFlags, 0, 0, capture_format_ptr, nullptr);
 	
 	if (FAILED(hr))
 	{
 		if (hr == AUDCLNT_E_UNSUPPORTED_FORMAT)
 		{
-			ERROR_LOG(AUDIO, "Error - capture device doesn't support the required stereo 16-bit 48000 Hz PCM format.");
+			ERROR_LOG(AUDIO, "Error - capture/loopback device doesn't support the required stereo 16-bit 48000 Hz PCM format.");
 		}
 		else
 		{
@@ -895,7 +906,8 @@ bool WASAPIStream::InitializeCaptureClient()
 
 void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_frames_to_render_target)
 {
-	if (!m_capture_client || !SConfig::GetInstance().m_mixAudioIn || !m_capture_audio_client)
+	if (!m_capture_client || m_audioCaptureType == AudioCaptureType::None
+		|| !m_capture_audio_client)
 	{
 		return;
 	}

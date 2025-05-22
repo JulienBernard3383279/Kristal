@@ -26,7 +26,7 @@ private:
 	void BindEvents();
 
 	void PopulateBackendChoiceBox();
-	void PopulateAudioInputDeviceChoiceBox();
+	void PopulateAudioDeviceChoiceBoxes();
 	void ToggleBackendSpecificControls(const std::string& backend);
 
 	void OnDSPEngineRadioBoxChanged(wxCommandEvent&);
@@ -36,9 +36,13 @@ private:
 	void OnLatencySpinCtrlChanged(wxCommandEvent&);
 	void OnTimeStretchingCheckBoxChanged(wxCommandEvent&);
 	void OnRS_Hack_checkboxChanged(wxCommandEvent&);
-	void OnMixAudioInCheckBoxChanged(wxCommandEvent&);
-	void OnAudioInputDeviceChanged(wxCommandEvent&);
-	
+	void OnMixRecordedAudioCheckBoxChanged(wxCommandEvent&);
+	void OnMixRecordedAudioCheckBoxChanged(bool);
+	void OnAudioRecordingDeviceChanged(wxCommandEvent&);
+	void OnMixLoopedBackAudioCheckBoxChanged(wxCommandEvent&);
+	void OnMixLoopedBackAudioCheckBoxChanged(bool);
+	void OnAudioLoopbackDeviceChanged(wxCommandEvent&);
+
 	wxArrayString m_dsp_engine_strings;
 	wxArrayString m_audio_backend_strings;
 	wxArrayString m_audio_input_device_strings;
@@ -52,6 +56,8 @@ private:
 	wxCheckBox* m_time_stretching_checkbox;
 	wxCheckBox* m_RS_Hack_checkbox;
 	wxStaticText* m_audio_latency_label;
-	wxCheckBox* m_mix_audio_in_checkbox;
-	wxChoice *m_audio_input_device_choice;
+	wxCheckBox* m_mix_recorded_audio_checkbox;
+	wxChoice *m_audio_recording_device_choice;
+	wxCheckBox* m_mix_looped_back_audio_checkbox;
+	wxChoice *m_audio_loopback_device_choice;
 };

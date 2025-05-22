@@ -403,8 +403,10 @@ struct SConfig : NonCopyable
 	bool m_DumpUCode;
 	int m_Volume;
 	std::string sBackend;
-	bool m_mixAudioIn;
+	bool m_mixRecordedAudioIn;
 	std::string sAudioInputDevice;
+	bool m_mixLoopedBackAudioIn;
+	std::string sAudioLoopedBackOutputDevice;
 
 	// Input settings
 	bool m_BackgroundInput;
