@@ -42,10 +42,11 @@ private:
 	void OnMixLoopedBackAudioCheckBoxChanged(wxCommandEvent&);
 	void OnMixLoopedBackAudioCheckBoxChanged(bool);
 	void OnAudioLoopbackDeviceChanged(wxCommandEvent&);
+	void OnSwitchDefaultAudioOutputDeviceDuringGameplayCheckBoxChanged(wxCommandEvent&);
+	void OnAudioOutputDeviceToSwitchToChoiceChanged(wxCommandEvent&);
 
 	wxArrayString m_dsp_engine_strings;
 	wxArrayString m_audio_backend_strings;
-	wxArrayString m_audio_input_device_strings;
 
 	wxRadioBox* m_dsp_engine_radiobox;
 	wxCheckBox* m_dpl2_decoder_checkbox;
@@ -60,4 +61,6 @@ private:
 	wxChoice *m_audio_recording_device_choice;
 	wxCheckBox* m_mix_looped_back_audio_checkbox;
 	wxChoice *m_audio_loopback_device_choice;
+	wxCheckBox* m_switch_default_audio_output_device_during_gameplay_checkbox;
+	wxChoice *m_audio_output_device_to_switch_to_choice;
 };

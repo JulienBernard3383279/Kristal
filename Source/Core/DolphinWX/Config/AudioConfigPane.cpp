@@ -35,8 +35,6 @@ AudioConfigPane::AudioConfigPane(wxWindow *parent, wxWindowID id)
 	BindEvents();
 }
 
-//TODO Only show audio checkboxes when WASAPI excl. is selected
-
 void AudioConfigPane::InitializeGUI()
 {
 	m_dsp_engine_strings.Add(_("DSP HLE emulation (fast)"));
@@ -63,17 +61,26 @@ void AudioConfigPane::InitializeGUI()
 		"the output of the rest of the system to a virtual audio input device, that will be mixed with the "
 		"game audio, achieving the lowest latency (that of exclusive output) without giving up audio from the "
 		"rest of the system."));
-	m_audio_recording_device_choice = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, m_audio_input_device_strings);
+	m_audio_recording_device_choice = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
 	m_audio_recording_device_choice->SetToolTip(
 	    _("Selects the recording device to use. This is only relevant when passing audio through from an input device."));
 
 	m_mix_looped_back_audio_checkbox = new wxCheckBox(this, wxID_ANY, _("Pass-through audio from looped-back playback device"));
 	m_mix_looped_back_audio_checkbox->SetToolTip(
 	    _("Similar to above, but the input audio is the output audio of a particular device (afforded by WASAPI loopback)"));
-	m_audio_loopback_device_choice =
-	    new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, m_audio_input_device_strings);
+	m_audio_loopback_device_choice = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
 	m_audio_loopback_device_choice->SetToolTip(
 	    _("Selects the playback device to use. This is only relevant when mixing in audio from an looped-back output device."));
+
+	m_switch_default_audio_output_device_during_gameplay_checkbox =
+	    new wxCheckBox(this, wxID_ANY, _("Switch default audio output device during gameplay"));
+	m_switch_default_audio_output_device_during_gameplay_checkbox->SetToolTip(_("Used in conjunction with options above. Has Dolphin switch "
+		"the default audio output device to the one you specify, so that you automatically switch the output from all other "
+		"applications to e.g. your virtual audio cable, while Dolphin takes exclusive control of the audio output you really use, "
+		"that the rest of your system was configured to use. Equivalent to switching your audio output device in the bottom right "
+		"corner of Windows, and back to the original device when you close the game."));
+	m_audio_output_device_to_switch_to_choice = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+	m_audio_output_device_to_switch_to_choice->SetToolTip(_("Selects the device to switch the default audio output to."));
 
 	m_time_stretching_checkbox = new wxCheckBox(this, wxID_ANY, _("Time Stretching"));
 	m_RS_Hack_checkbox = new wxCheckBox(this, wxID_ANY, _("Rogue Squadron 2/3 Hack"));
@@ -106,12 +113,17 @@ void AudioConfigPane::InitializeGUI()
 	backend_grid_sizer->Add(m_dpl2_decoder_checkbox, wxGBPosition(1, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_audio_latency_label, wxGBPosition(2, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_audio_latency_spinctrl, wxGBPosition(2, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
+
+
 	backend_grid_sizer->Add(m_mix_recorded_audio_checkbox, wxGBPosition(3, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(new wxStaticText(this, wxID_ANY, _("Input device:")), wxGBPosition(4, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_audio_recording_device_choice, wxGBPosition(4, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_mix_looped_back_audio_checkbox, wxGBPosition(5, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(new wxStaticText(this, wxID_ANY, _("Looped-back output device:")), wxGBPosition(6, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_audio_loopback_device_choice, wxGBPosition(6, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(m_switch_default_audio_output_device_during_gameplay_checkbox, wxGBPosition(7, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(new wxStaticText(this, wxID_ANY, _("Output device to switch to:")), wxGBPosition(8, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(m_audio_output_device_to_switch_to_choice, wxGBPosition(8, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 
 	wxStaticBoxSizer *const backend_static_box_sizer = new wxStaticBoxSizer(wxVERTICAL, this, _("Backend Settings"));
 	backend_static_box_sizer->AddSpacer(space5);
@@ -175,6 +187,14 @@ void AudioConfigPane::ToggleBackendSpecificControls(const std::string &backend)
 	bool supports_volume_changes = AudioCommon::SupportsVolumeChanges(backend);
 	m_volume_slider->Enable(supports_volume_changes);
 	m_volume_text->Enable(supports_volume_changes);
+
+	bool isExclusiveWASAPI = backend.find(BACKEND_EXCLUSIVE_WASAPI) != std::string::npos;
+	m_mix_recorded_audio_checkbox->Enable(isExclusiveWASAPI);
+	m_audio_recording_device_choice->Enable(isExclusiveWASAPI);
+	m_mix_looped_back_audio_checkbox->Enable(isExclusiveWASAPI);
+	m_audio_loopback_device_choice->Enable(isExclusiveWASAPI);
+	m_switch_default_audio_output_device_during_gameplay_checkbox->Enable(isExclusiveWASAPI);
+	m_audio_output_device_to_switch_to_choice->Enable(isExclusiveWASAPI);
 }
 
 void AudioConfigPane::BindEvents()
@@ -200,6 +220,9 @@ void AudioConfigPane::BindEvents()
 	m_audio_recording_device_choice->Bind(wxEVT_CHOICE, &AudioConfigPane::OnAudioRecordingDeviceChanged, this);
 	m_mix_looped_back_audio_checkbox->Bind(wxEVT_CHECKBOX, &AudioConfigPane::OnMixLoopedBackAudioCheckBoxChanged, this);
 	m_audio_loopback_device_choice->Bind(wxEVT_CHOICE, &AudioConfigPane::OnAudioLoopbackDeviceChanged, this);
+	m_switch_default_audio_output_device_during_gameplay_checkbox->Bind(wxEVT_CHECKBOX,
+		&AudioConfigPane::OnSwitchDefaultAudioOutputDeviceDuringGameplayCheckBoxChanged, this);
+	m_audio_output_device_to_switch_to_choice->Bind(wxEVT_CHOICE, &AudioConfigPane::OnAudioOutputDeviceToSwitchToChoiceChanged, this);
 }
 
 void AudioConfigPane::OnDSPEngineRadioBoxChanged(wxCommandEvent &event)
@@ -302,6 +325,16 @@ void AudioConfigPane::OnAudioLoopbackDeviceChanged(wxCommandEvent &event)
 	SConfig::GetInstance().sAudioLoopedBackOutputDevice = WxStrToStr(m_audio_loopback_device_choice->GetStringSelection());
 }
 
+void AudioConfigPane::OnSwitchDefaultAudioOutputDeviceDuringGameplayCheckBoxChanged(wxCommandEvent& event)
+{
+
+}
+
+void AudioConfigPane::OnAudioOutputDeviceToSwitchToChoiceChanged(wxCommandEvent& event)
+{
+
+}
+
 void AudioConfigPane::PopulateBackendChoiceBox()
 {
 	for (const std::string &backend : AudioCommon::GetSoundBackends())
@@ -315,12 +348,13 @@ void AudioConfigPane::PopulateBackendChoiceBox()
 
 void AudioConfigPane::PopulateAudioDeviceChoiceBoxes()
 {
-	for (const std::string &backend : AudioCommon::GetAudioInputDeviceNames())
+	for (const std::string &device : AudioCommon::GetAudioInputDeviceNames())
 	{
-		m_audio_recording_device_choice->Append(wxGetTranslation(StrToWxStr(backend)));
+		m_audio_recording_device_choice->Append(wxGetTranslation(StrToWxStr(device)));
 	}
-	for (const std::string &backend : AudioCommon::GetAudioOutputDeviceNames())
+	for (const std::string &device : AudioCommon::GetAudioOutputDeviceNames())
 	{
-		m_audio_loopback_device_choice->Append(wxGetTranslation(StrToWxStr(backend)));
+		m_audio_loopback_device_choice->Append(wxGetTranslation(StrToWxStr(device)));
+		m_audio_output_device_to_switch_to_choice->Append(wxGetTranslation(StrToWxStr(device)));
 	}
 }
