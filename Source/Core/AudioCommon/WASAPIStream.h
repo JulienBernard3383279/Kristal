@@ -71,20 +71,20 @@ public:
 	WAVEFORMATEXTENSIBLE captureFormat;
 	void CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples);
 
-	std::string m_default_audio_device_prior_to_switch;
-	void SwitchDefaultAudioOutputDeviceTo(const std::string &device_name);
+	std::wstring m_default_audio_device_id_prior_to_switch;
+	void SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(const std::string &device_name);
 	void RestoreDefaultAudioOutputDevice();
 #else
 public:
-  WASAPIStream(bool exclusive_mode, std::string device = "Default") { }
+	WASAPIStream(bool exclusive_mode, std::string device = "Default") { }
 
-  inline static std::vector<std::string> GetRenderDevices()
-  {
-	  return {};
-  }
-  inline static std::vector<std::string> GetCaptureDevices()
-  {
-	  return {};
-  }
+	inline static std::vector<std::string> GetRenderDevices()
+	{
+		return {};
+	}
+	inline static std::vector<std::string> GetCaptureDevices()
+	{
+		return {};
+	}
 #endif
 };
