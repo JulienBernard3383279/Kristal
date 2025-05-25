@@ -15,6 +15,8 @@
 
 #include "IPolicyConfig.h"
 #include <Endpointvolume.h>
+#include <cmath>
+#include <algorithm>
 
 WASAPIStream::WASAPIStream(bool exclusive_mode, std::string device)
     : m_exclusive_mode(exclusive_mode)
@@ -264,7 +266,7 @@ bool WASAPIStream::Start()
 		//TODO Similarly, must switch back only after the exclusive stream is closed
 		if (SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
 		{
-			AlterVolumeOfAudioDevice(2.0f, true);
+			AlterVolumeOfAudioDevice(6.0f, true); // +6dB i.e *2, to compensate for system signal halved
 			SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(SConfig::GetInstance().sAudioOutputDeviceToSwitchTo, true);
 		}
 
@@ -1130,67 +1132,138 @@ void WASAPIStream::RestoreDefaultAudioOutputDevice()
 	}
 }
 
-void WASAPIStream::AlterVolumeOfAudioDevice(float volume_multiplier, bool set_should_switch_volume_back) {
+void WASAPIStream::AlterVolumeOfAudioDevice(float db_change, bool store_original_and_set_flag)
+{
 	if (!m_mm_device)
+	{
+		WARN_LOG(AUDIO, "AlterVolumeOfAudioDevice: No m_mm_device available.");
 		return;
+	}
 
 	IAudioEndpointVolume *pEndpointVolume = nullptr;
 	HRESULT hr =
 	    m_mm_device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, NULL, (void **)&pEndpointVolume);
+
 	if (FAILED(hr) || !pEndpointVolume)
 	{
-		ERROR_LOG(AUDIO, "Could not activate IAudioEndpointVolume. Volume won't be adjusted to compensate for halving of system audio signal.");
+		ERROR_LOG(AUDIO, "Could not activate IAudioEndpointVolume. Volume won't be adjusted. HRESULT: %s",
+		          wasapi_hresult_to_string(hr).c_str());
 		SAFE_RELEASE(pEndpointVolume);
 		return;
 	}
 
-	float originalScalarVolume = 0.1f;
-	if (pEndpointVolume)
+	float currentVolumeDB = 0.0f;
+	float minDB = -96.0f; // A typical minimum, will be overwritten
+	float maxDB = 0.0f;   // A typical maximum, will be overwritten
+	float stepDB = 0.5f;  // A typical step, will be overwritten
+
+	hr = pEndpointVolume->GetMasterVolumeLevel(&currentVolumeDB);
+	if (FAILED(hr))
 	{
-		pEndpointVolume->GetMasterVolumeLevelScalar(&originalScalarVolume);
-		if (FAILED(hr) || !pEndpointVolume)
+		ERROR_LOG(AUDIO, "Could not get current master volume level (dB). Volume won't be adjusted. HRESULT: %s",
+		          wasapi_hresult_to_string(hr).c_str());
+		SAFE_RELEASE(pEndpointVolume);
+		return;
+	}
+
+	hr = pEndpointVolume->GetVolumeRange(&minDB, &maxDB, &stepDB);
+	if (FAILED(hr))
+	{
+		ERROR_LOG(AUDIO, "Could not get device volume range (dB). Volume won't be adjusted. HRESULT: %s",
+		          wasapi_hresult_to_string(hr).c_str());
+		SAFE_RELEASE(pEndpointVolume);
+		return;
+	}
+
+	INFO_LOG(AUDIO, "Device volume range: min=%.2fdB, max=%.2fdB, step=%.2fdB", minDB, maxDB, stepDB);
+
+	if (store_original_and_set_flag)
+	{
+		m_original_volume_db = currentVolumeDB;
+		INFO_LOG(AUDIO, "Stored original device volume: %.2fdB", m_original_volume_db);
+	}
+
+	float targetVolumeDB = currentVolumeDB + db_change;
+
+	targetVolumeDB = std::max(minDB, std::min(targetVolumeDB, maxDB));
+
+	if (stepDB > 0.0f) {
+	    targetVolumeDB = std::round(targetVolumeDB / stepDB) * stepDB;
+	}
+
+	if (std::abs(targetVolumeDB - currentVolumeDB) > (stepDB / 2.0f)) // Don't bother with very small changes
+	{ // Or a smaller epsilon like 0.01f
+		hr = pEndpointVolume->SetMasterVolumeLevel(targetVolumeDB, nullptr);
+		if (SUCCEEDED(hr))
 		{
-			ERROR_LOG(AUDIO, "Could not get master volume level for selected audio output device. "
-				"Volume won't be adjusted to compensate for halving of system audio signal.");
+			if (store_original_and_set_flag)
+			{
+				INFO_LOG(AUDIO,
+				         "Device volume compensation: old=%.2fdB, new=%.2fdB", m_original_volume_db, targetVolumeDB);
+			}
+			else
+			{
+				INFO_LOG(AUDIO, "Device volume restored to: %.2fdB", targetVolumeDB);
+			}
+		}
+		else
+		{
+			WARN_LOG(AUDIO, "Failed to set device volume to %.2fdB. HRESULT: %s", targetVolumeDB,
+			         wasapi_hresult_to_string(hr).c_str());
 			SAFE_RELEASE(pEndpointVolume);
 			return;
 		}
 	}
-	if (originalScalarVolume == 0.0f)
-	{
-		INFO_LOG(AUDIO, "Not adjusting volume: audio device is muted.");
-		SAFE_RELEASE(pEndpointVolume);
-		return;
-	}
-
-	float targetScalarVolume = originalScalarVolume * volume_multiplier;
-	if (targetScalarVolume > 1.0f)
-		targetScalarVolume = 1.0f;
-
-	hr = pEndpointVolume->SetMasterVolumeLevelScalar(targetScalarVolume, nullptr);
-	if (SUCCEEDED(hr))
-	{
-		INFO_LOG(AUDIO, "Applied +6dB compensation (clamped) to device volume. Original: %.2f, Target: %.2f", originalScalarVolume, targetScalarVolume);
-	}
 	else
 	{
-		WARN_LOG(AUDIO, "Failed to set compensated device volume. HRESULT: %s", wasapi_hresult_to_string(hr).c_str());
-		SAFE_RELEASE(pEndpointVolume);
-		return;
+		INFO_LOG(AUDIO, "Device volume already at target or very close (Current: %.2fdB, Target: %.2fdB), no change made.", currentVolumeDB, targetVolumeDB);
 	}
 
-	m_volume_multiplier_effectively_applied = targetScalarVolume / originalScalarVolume;
-	m_should_switch_volume_back = true;
+	if (store_original_and_set_flag)
+	{
+		m_should_switch_volume_back = true;
+	}
 
 	SAFE_RELEASE(pEndpointVolume);
-	return;
 }
-void WASAPIStream::RestoreVolumeIfNeeded() {
+
+void WASAPIStream::RestoreVolumeIfNeeded()
+{
 	if (m_should_switch_volume_back)
 	{
 		if (m_mm_device)
 		{
-			AlterVolumeOfAudioDevice((float)(1.0 / m_volume_multiplier_effectively_applied), false);
+			DEBUG_LOG(AUDIO, "Attempting to restore original device volume of %.2fdB.", m_original_volume_db);
+
+			IAudioEndpointVolume *pEndpointVolume = nullptr;
+			HRESULT hr = m_mm_device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, NULL,
+			                                   (void **)&pEndpointVolume);
+			if (FAILED(hr) || !pEndpointVolume)
+			{
+				ERROR_LOG(AUDIO,
+				          "RestoreVolume: Could not activate IAudioEndpointVolume. Original volume may not be "
+				          "restored. HRESULT: %s",
+				          wasapi_hresult_to_string(hr).c_str());
+				SAFE_RELEASE(pEndpointVolume);
+				m_should_switch_volume_back = false;
+				return;
+			}
+
+			hr = pEndpointVolume->SetMasterVolumeLevel(m_original_volume_db, nullptr);
+			if (SUCCEEDED(hr))
+			{
+				INFO_LOG(AUDIO, "Successfully restored original device volume to %.2fdB.", m_original_volume_db);
+			}
+			else
+			{
+				WARN_LOG(AUDIO, "Failed to restore original device volume to %.2fdB. HRESULT: %s", m_original_volume_db,
+				         wasapi_hresult_to_string(hr).c_str());
+			}
+			SAFE_RELEASE(pEndpointVolume);
+		}
+		else
+		{
+			WARN_LOG(AUDIO, "RestoreVolume: No m_mm_device available to restore volume.");
 		}
 		m_should_switch_volume_back = false;
 	}

@@ -81,9 +81,10 @@ public:
 	void RestoreDefaultAudioOutputDevice();
 
 	bool m_should_switch_volume_back = false;
-	double m_volume_multiplier_effectively_applied = 1.0;
-	void AlterVolumeOfAudioDevice(float volume_multiplier, bool set_should_switch_volume_back);
+	float m_original_volume_db = 0.0f;
+	void AlterVolumeOfAudioDevice(float db_change, bool store_original_and_set_flag);
 	void RestoreVolumeIfNeeded();
+
 #else
 public:
 	WASAPIStream(bool exclusive_mode, std::string device = "Default") { }
