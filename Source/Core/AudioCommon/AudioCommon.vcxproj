@@ -82,6 +82,7 @@
     <ClInclude Include="CubebUtils.h" />
     <ClInclude Include="DPL2Decoder.h" />
     <ClInclude Include="DSoundStream.h" />
+    <ClInclude Include="IPolicyConfig.h" />
     <ClInclude Include="Mixer.h" />
     <ClInclude Include="NullSoundStream.h" />
     <ClInclude Include="OpenALStream.h" />

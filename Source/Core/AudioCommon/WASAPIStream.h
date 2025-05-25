@@ -70,6 +70,10 @@ public:
 	bool InitializeCaptureClient();
 	WAVEFORMATEXTENSIBLE captureFormat;
 	void CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples);
+
+	std::string m_default_audio_device_prior_to_switch;
+	void SwitchDefaultAudioOutputDeviceTo(const std::string &device_name);
+	void RestoreDefaultAudioOutputDevice();
 #else
 public:
   WASAPIStream(bool exclusive_mode, std::string device = "Default") { }

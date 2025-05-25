@@ -407,6 +407,8 @@ struct SConfig : NonCopyable
 	std::string sAudioInputDevice;
 	bool m_mixLoopedBackAudioIn;
 	std::string sAudioLoopedBackOutputDevice;
+	bool m_SwitchDefaultAudioOutputDeviceDuringGameplay;
+	std::string sAudioOutputDeviceToSwitchTo;
 
 	// Input settings
 	bool m_BackgroundInput;

@@ -11,7 +11,9 @@
 #include <mmdeviceapi.h>
 
 #include <locale>
-#include <sstream> // Required for ostringstream
+#include <sstream>
+
+#include "IPolicyConfig.h"
 
 WASAPIStream::WASAPIStream(bool exclusive_mode, std::string device)
     : m_exclusive_mode(exclusive_mode)
@@ -258,6 +260,11 @@ bool WASAPIStream::Start()
 
 	if (m_exclusive_mode)
 	{
+		// Important: must switch other streams to the new output device before taking exclusive control of the one they were using
+		// or we'll run into a myriad of issues with the other apps' streams crashing
+		//TODO Similarly, must switch back only after the exclusive stream is closed
+		SwitchDefaultAudioOutputDeviceTo(SConfig::GetInstance().sAudioOutputDeviceToSwitchTo);
+
 		exclusive_device_period += SConfig::GetInstance().iLatency * 10000;
 
 		hr = m_audio_client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, exclusiveStreamFlags, exclusive_device_period,
@@ -670,7 +677,34 @@ void WASAPIStream::Stop()
 	SAFE_RELEASE(m_capture_audio_client);
 }
 
-std::vector<std::string> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000_0001 audioDeviceMode)
+std::string lwpstrToString(LPCWSTR wstr)
+{
+	if (wstr == nullptr)
+		return "";
+	char buffer[2048];
+	size_t ret = wcstombs(buffer, wstr, sizeof(buffer));
+	if (ret == 2048)
+		buffer[2047] = '\0';
+	return std::string(buffer);
+}
+
+// Pair of ids/friendly name
+struct AudioDevice
+{
+	std::wstring id;
+	std::string friendlyName;
+
+	/*bool operator==(const AudioDevice &other) const
+	{
+		return (id == other.id) && (friendlyName == other.friendlyName);
+	}
+
+	bool operator!=(const AudioDevice &other) const
+	{
+		return !(*this == other); 
+	}*/
+};
+std::vector<AudioDevice> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000_0001 audioDeviceMode)
 {
 	HRESULT hr = S_OK;
 	IMMDeviceEnumerator *mm_device_enumerator = nullptr;
@@ -702,7 +736,7 @@ std::vector<std::string> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000
 	UINT device_count = 0;
 	devices->GetCount(&device_count);
 
-	std::vector<std::string> results;
+	std::vector<AudioDevice> results;
 	for (UINT i = 0; i < device_count; i++)
 	{
 		IMMDevice *device = nullptr;
@@ -711,25 +745,21 @@ std::vector<std::string> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000
 		IPropertyStore *pstore = nullptr;
 		device->OpenPropertyStore(STGM_READ, &pstore);
 
+		LPWSTR pwszID = NULL;
+		device->GetId(&pwszID);
+		std::wstring id{pwszID};
+
 		PROPVARIANT name_prop;
 		PropVariantInit(&name_prop);
-
 		pstore->GetValue(PKEY_Device_FriendlyName, &name_prop);
-
-		char name_cstr[2048];
-		size_t ret;
-
-		ret = wcstombs(name_cstr, name_prop.pwszVal, sizeof(name_cstr));
-		if(ret == 2048) name_cstr[2047] = '\0';
-
-		std::string name_stdstr = name_cstr;
+		std::string name_stdstr = lwpstrToString(name_prop.pwszVal);
 
 		for (int j = 0; j <= 9; j++)
 		{
 			if (name_stdstr.substr(0, std::string("0 - ").size()) == std::to_string(j) + " - ")
 				name_stdstr = name_stdstr.substr(std::string("0 - ").size()) + " [" + std::to_string(j) + "]";
 		}
-		results.push_back(name_stdstr);
+		results.push_back({id, name_stdstr});
 
 		PropVariantClear(&name_prop);
 		SAFE_RELEASE(pstore);
@@ -744,12 +774,22 @@ std::vector<std::string> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000
 
 std::vector<std::string> WASAPIStream::GetRenderDeviceNames()
 {
-	return GetAudioDevices(eRender);
+	std::vector<std::string> v{};
+	for (const auto &device : GetAudioDevices(eRender))
+	{
+		v.push_back(device.friendlyName);
+	}
+	return v;
 }
 
 std::vector<std::string> WASAPIStream::GetCaptureDeviceNames()
 {
-	return GetAudioDevices(eCapture);
+	std::vector<std::string> v{};
+	for (const auto &device : GetAudioDevices(eCapture))
+	{
+		v.push_back(device.friendlyName);
+	}
+	return v;
 }
 
 bool WASAPIStream::InitializeCaptureClient()
@@ -992,6 +1032,7 @@ void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_frames_to_render_
 				if (shorts_mixed_this_cycle < num_shorts_to_render_target)
 				{
 					// Add captured audio (also halved) to the already halved mix_buffer
+					//TODO Toggle for volume/2, or better
 					mix_buffer[shorts_mixed_this_cycle] += s16_capture_data[i] / 2;
 					shorts_mixed_this_cycle++;
 				}
@@ -1019,4 +1060,53 @@ void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_frames_to_render_
 	// At this point, mix_buffer has been processed up to shorts_mixed_this_cycle.
 	// Any remaining part of mix_buffer (if shorts_mixed_this_cycle < num_shorts_to_render_target)
 	// will not have captured audio mixed in for this call if no more packets were available.
+}
+
+void WASAPIStream::SwitchDefaultAudioOutputDeviceTo(const std::string& device_name)
+{
+	HRESULT hr = S_OK;
+	IMMDeviceEnumerator *pEnumerator = NULL;
+	IMMDeviceCollection *pCollection = NULL;
+	IMMDevice *pCurrentDefaultConsoleDevice = NULL;
+	IMMDevice *pCurrentDefaultMultimediaDevice = NULL;
+	LPWSTR pwszDefaultConsoleId = NULL;
+	LPWSTR pwszDefaultMultimediaId = NULL;
+
+	hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+	                      (void **)&pEnumerator);
+
+	if (FAILED(hr)) //TODO Logs
+		return;
+
+	if (SUCCEEDED(pEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &pCurrentDefaultConsoleDevice)))
+	{
+		pCurrentDefaultConsoleDevice->GetId(&pwszDefaultConsoleId);
+		m_default_audio_device_prior_to_switch = lwpstrToString(pwszDefaultConsoleId);
+		SAFE_RELEASE(pCurrentDefaultConsoleDevice);
+	}
+	else
+		return;
+
+	std::vector<AudioDevice> audioDevices = GetAudioDevices(eRender);
+	auto findResult = std::find_if(audioDevices.begin(), audioDevices.end(), [](const AudioDevice &device)
+	          { return device.friendlyName == SConfig::GetInstance().sAudioOutputDeviceToSwitchTo; });
+	if (findResult != audioDevices.end())
+	{
+		IPolicyConfig *pPolicyConfig = NULL;
+		HRESULT hr = CoCreateInstance(_uuidof(CPolicyConfigClient), NULL, CLSCTX_INPROC_SERVER, _uuidof(IPolicyConfig),
+		                              (LPVOID *)&pPolicyConfig);
+		if (FAILED(hr))
+		{
+			ERROR_LOG(AUDIO, "Failed to switch default audio output device: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			return;
+		}
+
+		hr = pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eConsole);
+
+		SAFE_RELEASE(pPolicyConfig);
+	}
+}
+void WASAPIStream::RestoreDefaultAudioOutputDevice()
+{
+
 }

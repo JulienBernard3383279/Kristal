@@ -77,6 +77,7 @@
     <ClInclude Include="WASAPIStream.h">
       <Filter>SoundStreams</Filter>
     </ClInclude>
+    <ClInclude Include="IPolicyConfig.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="CMakeLists.txt" />

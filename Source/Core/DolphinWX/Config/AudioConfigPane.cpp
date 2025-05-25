@@ -171,9 +171,14 @@ void AudioConfigPane::LoadGUIValues()
 	m_mix_recorded_audio_checkbox->SetValue(startup_params.m_mixRecordedAudioIn);
 	m_audio_recording_device_choice->Enable(startup_params.m_mixRecordedAudioIn);
 	m_audio_recording_device_choice->SetStringSelection(StrToWxStr(startup_params.sAudioInputDevice));
+
 	m_mix_looped_back_audio_checkbox->SetValue(startup_params.m_mixLoopedBackAudioIn);
 	m_audio_loopback_device_choice->Enable(startup_params.m_mixLoopedBackAudioIn);
 	m_audio_loopback_device_choice->SetStringSelection(StrToWxStr(startup_params.sAudioLoopedBackOutputDevice));
+
+	m_switch_default_audio_output_device_during_gameplay_checkbox->SetValue(startup_params.m_SwitchDefaultAudioOutputDeviceDuringGameplay);
+	m_audio_output_device_to_switch_to_choice->Enable(startup_params.m_SwitchDefaultAudioOutputDeviceDuringGameplay);
+	m_audio_output_device_to_switch_to_choice->SetStringSelection(StrToWxStr(startup_params.sAudioOutputDeviceToSwitchTo));
 }
 
 void AudioConfigPane::ToggleBackendSpecificControls(const std::string &backend)
@@ -327,12 +332,14 @@ void AudioConfigPane::OnAudioLoopbackDeviceChanged(wxCommandEvent &event)
 
 void AudioConfigPane::OnSwitchDefaultAudioOutputDeviceDuringGameplayCheckBoxChanged(wxCommandEvent& event)
 {
-
+	SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay = event.IsChecked();
+	m_audio_output_device_to_switch_to_choice->Enable(event.IsChecked());
+	m_audio_output_device_to_switch_to_choice->Refresh();
 }
 
 void AudioConfigPane::OnAudioOutputDeviceToSwitchToChoiceChanged(wxCommandEvent& event)
 {
-
+	SConfig::GetInstance().sAudioOutputDeviceToSwitchTo = WxStrToStr(m_audio_output_device_to_switch_to_choice->GetStringSelection());
 }
 
 void AudioConfigPane::PopulateBackendChoiceBox()

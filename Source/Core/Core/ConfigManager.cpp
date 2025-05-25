@@ -357,6 +357,8 @@ void SConfig::SaveDSPSettings(IniFile &ini)
 	dsp->Set("AudioInputDevice", sAudioInputDevice);
 	dsp->Set("MixLoopedBackAudioIn", m_mixLoopedBackAudioIn);
 	dsp->Set("AudioLoopedBackOutputDevice", sAudioLoopedBackOutputDevice);
+	dsp->Set("SwitchDefaultAudioOutputDeviceDuringGameplay", m_SwitchDefaultAudioOutputDeviceDuringGameplay);
+	dsp->Set("AudioOutputDeviceToSwitchTo", sAudioOutputDeviceToSwitchTo);
 	dsp->Set("Volume", m_Volume);
 	dsp->Set("CaptureLog", m_DSPCaptureLog);
 }
@@ -745,6 +747,8 @@ void SConfig::LoadDSPSettings(IniFile &ini)
 	dsp->Get("AudioInputDevice", &sAudioInputDevice);
 	dsp->Get("MixLoopedBackAudioIn", &m_mixLoopedBackAudioIn);
 	dsp->Get("AudioLoopedBackOutputDevice", &sAudioLoopedBackOutputDevice);
+	dsp->Get("SwitchDefaultAudioOutputDeviceDuringGameplay", &m_SwitchDefaultAudioOutputDeviceDuringGameplay);
+	dsp->Get("AudioOutputDeviceToSwitchTo", &sAudioOutputDeviceToSwitchTo);
 
 	// fix 5.8b style setting
 	if (sBackend == "Exclusive-mode WASAPI")
