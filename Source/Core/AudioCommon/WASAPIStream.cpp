@@ -18,6 +18,15 @@
 #include <cmath>
 #include <algorithm>
 
+#define SAFE_RELEASE(p)                                                                                                \
+	{                                                                                                                  \
+		if ((p))                                                                                                       \
+		{                                                                                                              \
+			(p)->Release();                                                                                            \
+			(p) = nullptr;                                                                                             \
+		}                                                                                                              \
+	}
+
 WASAPIStream::WASAPIStream(bool exclusive_mode, std::string device)
     : m_exclusive_mode(exclusive_mode)
     , m_selected_device(device)
@@ -25,6 +34,18 @@ WASAPIStream::WASAPIStream(bool exclusive_mode, std::string device)
                          SConfig::GetInstance().m_mixRecordedAudioIn ? AudioCaptureType::Recording : AudioCaptureType::None)
 {
 	CoInitialize(nullptr);
+}
+WASAPIStream::~WASAPIStream() {
+	if (m_need_data_event)
+		CloseHandle(m_need_data_event);
+
+	SAFE_RELEASE(m_renderer);
+	SAFE_RELEASE(m_capture_client);
+	SAFE_RELEASE(m_audio_client);
+	SAFE_RELEASE(m_capture_audio_client);
+	SAFE_RELEASE(m_mm_device);
+
+	CoUninitialize();
 }
 
 static std::string wasapi_hresult_to_string(HRESULT res)
@@ -64,15 +85,6 @@ static std::string wasapi_hresult_to_string(HRESULT res)
 
 	return "UNKNOWN, " + std::to_string(res);
 }
-
-#define SAFE_RELEASE(p)                                                                                                \
-	{                                                                                                                  \
-		if ((p))                                                                                                       \
-		{                                                                                                              \
-			(p)->Release();                                                                                            \
-			(p) = nullptr;                                                                                             \
-		}                                                                                                              \
-	}
 
 #ifndef PKEY_Device_FriendlyName
 DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0, 14);
@@ -263,7 +275,7 @@ bool WASAPIStream::Start()
 	{
 		// Important: must switch other streams to the new output device before taking exclusive control of the one they were using
 		// or we'll run into a myriad of issues with the other apps' streams crashing
-		//TODO Similarly, must switch back only after the exclusive stream is closed
+		// Similarly, must switch back only after the exclusive stream is closed
 		if (SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
 		{
 			AlterVolumeOfAudioDevice(6.0f, true); // +6dB i.e *2, to compensate for system signal halved
@@ -320,9 +332,9 @@ bool WASAPIStream::Start()
 		{
 			if (!InitializeCaptureClient())
 			{
-				ERROR_LOG(AUDIO, "WASAPIStream: Failed to initialize capture client. Audio will not start.");
-				// hr = E_FAIL; // Uncommenting this causes capture client init failing to cause overall audio init to
-				// fail Currently we let audio work even if audio mix-in was asked for but doesn't work
+				ERROR_LOG(AUDIO, "WASAPIStream: Failed to initialize capture client. External audio will not be mixed in.");
+				// hr = E_FAIL; // Uncommenting this causes capture client init failing to cause overall audio init to fail
+				// Currently we let audio work even if audio mix-in was asked for but doesn't work
 			}
 		}
 	}
@@ -398,7 +410,7 @@ bool WASAPIStream::Start()
 		}
 	};
 
-	if (FAILED(hr)) // This hr is primarily from IAudioClient::Initialize or InitializeCaptureClient failure
+	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s during Initialize", wasapi_hresult_to_string(hr).c_str());
 		cleanUpAudioClients(false);
@@ -702,7 +714,6 @@ std::string lwpstrToString(LPCWSTR wstr)
 	return std::string(buffer);
 }
 
-// Pair of ids/friendly name
 struct AudioDevice
 {
 	std::wstring id;
@@ -751,7 +762,13 @@ std::vector<AudioDevice> GetAudioDevices(__MIDL___MIDL_itf_mmdeviceapi_0000_0000
 
 		LPWSTR pwszID = NULL;
 		device->GetId(&pwszID);
-		std::wstring id{pwszID};
+		std::wstring id{};
+		if (pwszID)
+		{
+			id = pwszID;
+			CoTaskMemFree(pwszID);
+			pwszID = nullptr;
+		}
 
 		PROPVARIANT name_prop;
 		PropVariantInit(&name_prop);
@@ -1085,12 +1102,21 @@ void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDevice
 	if (SUCCEEDED(pEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &pCurrentDefaultConsoleDevice)))
 	{
 		pCurrentDefaultConsoleDevice->GetId(&pwszDefaultConsoleId);
-		m_default_audio_device_id_prior_to_switch = std::wstring(pwszDefaultConsoleId);
-		m_pending_audio_device_switch_back = true;
+		if (pwszDefaultConsoleId)
+		{
+			m_default_audio_device_id_prior_to_switch = std::wstring(pwszDefaultConsoleId);
+			m_pending_audio_device_switch_back = true;
+
+			CoTaskMemFree(pwszDefaultConsoleId);
+			pwszDefaultConsoleId = nullptr;
+		}
 		SAFE_RELEASE(pCurrentDefaultConsoleDevice);
 	}
 	else
+	{
+		SAFE_RELEASE(pEnumerator);
 		return;
+	}
 
 	std::vector<AudioDevice> audioDevices = GetAudioDevices(eRender);
 	auto findResult = std::find_if(audioDevices.begin(), audioDevices.end(), [](const AudioDevice &device)
@@ -1110,6 +1136,8 @@ void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDevice
 
 		SAFE_RELEASE(pPolicyConfig);
 	}
+
+	SAFE_RELEASE(pEnumerator);
 }
 void WASAPIStream::RestoreDefaultAudioOutputDevice()
 {
@@ -1136,7 +1164,7 @@ void WASAPIStream::AlterVolumeOfAudioDevice(float db_change, bool store_original
 {
 	if (!m_mm_device)
 	{
-		WARN_LOG(AUDIO, "AlterVolumeOfAudioDevice: No m_mm_device available.");
+		WARN_LOG(AUDIO, "AlterVolumeOfAudioDevice: m_mm_device not set.");
 		return;
 	}
 
@@ -1152,10 +1180,7 @@ void WASAPIStream::AlterVolumeOfAudioDevice(float db_change, bool store_original
 		return;
 	}
 
-	float currentVolumeDB = 0.0f;
-	float minDB = -96.0f; // A typical minimum, will be overwritten
-	float maxDB = 0.0f;   // A typical maximum, will be overwritten
-	float stepDB = 0.5f;  // A typical step, will be overwritten
+	float currentVolumeDB, minDB, maxDB, stepDB;
 
 	hr = pEndpointVolume->GetMasterVolumeLevel(&currentVolumeDB);
 	if (FAILED(hr))
@@ -1192,7 +1217,7 @@ void WASAPIStream::AlterVolumeOfAudioDevice(float db_change, bool store_original
 	}
 
 	if (std::abs(targetVolumeDB - currentVolumeDB) > (stepDB / 2.0f)) // Don't bother with very small changes
-	{ // Or a smaller epsilon like 0.01f
+	{
 		hr = pEndpointVolume->SetMasterVolumeLevel(targetVolumeDB, nullptr);
 		if (SUCCEEDED(hr))
 		{

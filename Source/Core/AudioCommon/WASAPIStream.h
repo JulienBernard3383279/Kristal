@@ -21,17 +21,7 @@ class WASAPIStream final : public SoundStream
 public:
 	WASAPIStream(bool exclusive_mode, std::string device = "Default");
 
-	~WASAPIStream()
-	{
-		if(m_need_data_event)
-			CloseHandle(m_need_data_event);
-		if(m_renderer)
-			m_renderer->Release();
-		if(m_audio_client)
-			m_audio_client->Release();
-
-		CoUninitialize();
-	}
+	~WASAPIStream();
 
 	bool Start() override;
 	void SoundLoop() override;
