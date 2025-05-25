@@ -12,6 +12,7 @@
 
 #ifdef _WIN32
 #include <audioclient.h>
+#include <mmdeviceapi.h>
 #endif
 
 class WASAPIStream final : public SoundStream
@@ -50,6 +51,8 @@ public:
 	IAudioClient* m_capture_audio_client = nullptr;
 	IAudioCaptureClient* m_capture_client = nullptr;
 	std::string m_selected_device;
+	IMMDevice *m_mm_device = nullptr; // Long lived device COM object for output device used, used to switch volume back on Stop
+
 
 	HANDLE m_need_data_event = nullptr;
 
@@ -71,9 +74,16 @@ public:
 	WAVEFORMATEXTENSIBLE captureFormat;
 	void CaptureAudioAndMix(s16 *mix_buffer, u32 num_samples);
 
+	bool m_pending_audio_device_switch_back = false; // Should switch to optional upon migration to C++17
 	std::wstring m_default_audio_device_id_prior_to_switch;
-	void SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(const std::string &device_name);
+
+	void SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(const std::string &device_name, bool doubleVolume);
 	void RestoreDefaultAudioOutputDevice();
+
+	bool m_should_switch_volume_back = false;
+	double m_volume_multiplier_effectively_applied = 1.0;
+	void AlterVolumeOfAudioDevice(float volume_multiplier, bool set_should_switch_volume_back);
+	void RestoreVolumeIfNeeded();
 #else
 public:
 	WASAPIStream(bool exclusive_mode, std::string device = "Default") { }

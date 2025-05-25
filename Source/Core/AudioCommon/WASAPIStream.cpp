@@ -14,6 +14,7 @@
 #include <sstream>
 
 #include "IPolicyConfig.h"
+#include <Endpointvolume.h>
 
 WASAPIStream::WASAPIStream(bool exclusive_mode, std::string device)
     : m_exclusive_mode(exclusive_mode)
@@ -114,7 +115,7 @@ bool WASAPIStream::Start()
 		return false;
 	}
 
-	IMMDevice *mm_device = nullptr;
+	m_mm_device = nullptr;
 
 	std::string lower_device = "";
 	for (char c : m_selected_device)
@@ -122,7 +123,7 @@ bool WASAPIStream::Start()
 
 	if (lower_device.find("default") != std::string::npos)
 	{
-		hr = mm_device_enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &mm_device);
+		hr = mm_device_enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &m_mm_device);
 		if (FAILED(hr))
 		{
 			ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
@@ -175,20 +176,20 @@ bool WASAPIStream::Start()
 
 			if (name_stdstr == m_selected_device)
 			{
-				mm_device =
+				m_mm_device =
 				    device_item; // Assign and it will be released later if not used, or by SAFE_RELEASE(mm_device)
 			}
 
 			PropVariantClear(&name_prop);
 			SAFE_RELEASE(pstore);
 
-			if (mm_device != device_item) // If this item is not the selected one, release it now
+			if (m_mm_device != device_item) // If this item is not the selected one, release it now
 				SAFE_RELEASE(device_item);
 		}
 		SAFE_RELEASE(devices);
 	}
 
-	if (mm_device == nullptr)
+	if (m_mm_device == nullptr)
 	{
 		OSD::AddMessage("Invalid audio device \"" + m_selected_device +
 		                    "\" selected for WASAPI. Check your backend settings.",
@@ -198,14 +199,13 @@ bool WASAPIStream::Start()
 	}
 
 
-	hr = mm_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void **)&m_audio_client);
+	hr = m_mm_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void **)&m_audio_client);
 
 	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		ERROR_LOG(AUDIO, "WASAPIStream: Error @ MMDevice::Activate -> IAudioClient");
 		SAFE_RELEASE(mm_device_enumerator);
-		SAFE_RELEASE(mm_device);
 		// m_audio_client is not valid or null
 		return false;
 	}
@@ -250,7 +250,6 @@ bool WASAPIStream::Start()
 
 		SAFE_RELEASE(m_audio_client);
 		SAFE_RELEASE(mm_device_enumerator);
-		SAFE_RELEASE(mm_device);
 		return false;
 	}
 
@@ -264,7 +263,10 @@ bool WASAPIStream::Start()
 		// or we'll run into a myriad of issues with the other apps' streams crashing
 		//TODO Similarly, must switch back only after the exclusive stream is closed
 		if (SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
-			SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(SConfig::GetInstance().sAudioOutputDeviceToSwitchTo);
+		{
+			AlterVolumeOfAudioDevice(2.0f, true);
+			SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(SConfig::GetInstance().sAudioOutputDeviceToSwitchTo, true);
+		}
 
 		exclusive_device_period += SConfig::GetInstance().iLatency * 10000;
 
@@ -290,7 +292,6 @@ bool WASAPIStream::Start()
 				ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr_align_bufsize).c_str());
 				ERROR_LOG(AUDIO, "WASAPIStream: Couldn't get buffer size for alignment.");
 				SAFE_RELEASE(mm_device_enumerator);
-				SAFE_RELEASE(mm_device);
 				return false;
 			}
 
@@ -299,13 +300,12 @@ bool WASAPIStream::Start()
 			    SConfig::GetInstance().iLatency * 10000;
 
 			// Need to re-activate to get a new IAudioClient instance
-			hr = mm_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void **)&m_audio_client);
+			hr = m_mm_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void **)&m_audio_client);
 			if (FAILED(hr))
 			{
 				ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 				ERROR_LOG(AUDIO, "WASAPIStream: Error @ MMDevice::Activate (alignment fix) -> IAudioClient");
 				SAFE_RELEASE(mm_device_enumerator);
-				SAFE_RELEASE(mm_device);
 				// m_audio_client is already null or invalid
 				return false;
 			}
@@ -350,14 +350,14 @@ bool WASAPIStream::Start()
 			{
 				std::ostringstream oss{};
 				oss << "Shared Mode Engine Periods (frames @ " << format_ptr->nSamplesPerSec << " Hz):\n";
-				oss << "  Default:     " << defaultPeriod << " (" << (double)defaultPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
-				oss << "  Fundamental: " << fundamentalPeriod << " (" << (double)fundamentalPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
-				oss << "  Min:         " << minPeriod << " (" << (double)minPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
-				oss << "  Max:         " << maxPeriod << " (" << (double)maxPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
+				oss << "  Default:     " << defaultPeriod << " (" << (float)defaultPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
+				oss << "  Fundamental: " << fundamentalPeriod << " (" << (float)fundamentalPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
+				oss << "  Min:         " << minPeriod << " (" << (float)minPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
+				oss << "  Max:         " << maxPeriod << " (" << (float)maxPeriod * 1000.0 / format_ptr->nSamplesPerSec << " ms)\n";
 				INFO_LOG(AUDIO, oss.str().c_str());
 
 				OSD::AddMessage(std::string{"Using audio engine period: " +
-				                            std::to_string((double)minPeriod * 1000.0 / format_ptr->nSamplesPerSec) +
+				                            std::to_string((float)minPeriod * 1000.0 / format_ptr->nSamplesPerSec) +
 				                            " ms (Shared WASAPI)"},
 				                10000U);
 			}
@@ -379,7 +379,6 @@ bool WASAPIStream::Start()
 	}
 
 	SAFE_RELEASE(mm_device_enumerator);
-	SAFE_RELEASE(mm_device);
 
 	auto cleanUpAudioClients = [&](bool stopCaptureClient = true)
 	{
@@ -390,7 +389,10 @@ bool WASAPIStream::Start()
 			SAFE_RELEASE(m_capture_client);
 			SAFE_RELEASE(m_capture_audio_client);
 			if (SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
+			{
+				RestoreVolumeIfNeeded();
 				RestoreDefaultAudioOutputDevice();
+			}
 		}
 	};
 
@@ -411,7 +413,7 @@ bool WASAPIStream::Start()
 	}
 	else
 	{
-		double bufferInMs = (double)frames_in_buffer * 1000.0 / fmt.Format.nSamplesPerSec;
+		double bufferInMs = (float)frames_in_buffer * 1000.0 / fmt.Format.nSamplesPerSec;
 		INFO_LOG(AUDIO, "WASAPIStream: Buffer size: %u frames; %f ms", frames_in_buffer, bufferInMs);
 		OSD::AddMessage("Effective audio buffer size: " + std::to_string(bufferInMs) + " ms", 10000U);
 	}
@@ -660,7 +662,7 @@ void WASAPIStream::Stop()
 {
 	SoundStream::Stop(); // This should signal threadData to false and join the SoundLoop thread
 
-	if(m_need_data_event)
+	if (m_need_data_event)
 	{
 		CloseHandle(m_need_data_event);
 		m_need_data_event = nullptr;
@@ -674,13 +676,17 @@ void WASAPIStream::Stop()
 		m_capture_audio_client->Stop();
 	}
 
+	if (SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
+	{
+		RestoreVolumeIfNeeded();
+		RestoreDefaultAudioOutputDevice();
+	}
+
 	SAFE_RELEASE(m_renderer);
 	SAFE_RELEASE(m_capture_client);
 	SAFE_RELEASE(m_audio_client);
 	SAFE_RELEASE(m_capture_audio_client);
-
-	if (SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
-		RestoreDefaultAudioOutputDevice();
+	SAFE_RELEASE(m_mm_device);
 }
 
 std::string lwpstrToString(LPCWSTR wstr)
@@ -1058,7 +1064,7 @@ void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_frames_to_render_
 	// will not have captured audio mixed in for this call if no more packets were available.
 }
 
-void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(const std::string& device_name)
+void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(const std::string& device_name, bool doubleVolume)
 {
 	HRESULT hr = S_OK;
 	IMMDeviceEnumerator *pEnumerator = NULL;
@@ -1078,6 +1084,7 @@ void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDevice
 	{
 		pCurrentDefaultConsoleDevice->GetId(&pwszDefaultConsoleId);
 		m_default_audio_device_id_prior_to_switch = std::wstring(pwszDefaultConsoleId);
+		m_pending_audio_device_switch_back = true;
 		SAFE_RELEASE(pCurrentDefaultConsoleDevice);
 	}
 	else
@@ -1104,17 +1111,87 @@ void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDevice
 }
 void WASAPIStream::RestoreDefaultAudioOutputDevice()
 {
-	IPolicyConfig *pPolicyConfig = NULL;
-	HRESULT hr = CoCreateInstance(_uuidof(CPolicyConfigClient), NULL, CLSCTX_INPROC_SERVER, _uuidof(IPolicyConfig),
-	                              (LPVOID *)&pPolicyConfig);
-	if (FAILED(hr))
+	if (m_pending_audio_device_switch_back)
 	{
-		ERROR_LOG(AUDIO, "Failed to switch default audio output device: HRESULT %s",
-		          wasapi_hresult_to_string(hr).c_str());
+		IPolicyConfig *pPolicyConfig = NULL;
+		HRESULT hr = CoCreateInstance(_uuidof(CPolicyConfigClient), NULL, CLSCTX_INPROC_SERVER, _uuidof(IPolicyConfig),
+		                              (LPVOID *)&pPolicyConfig);
+		if (FAILED(hr))
+		{
+			ERROR_LOG(AUDIO, "Failed to switch default audio output device: HRESULT %s",
+			          wasapi_hresult_to_string(hr).c_str());
+			return;
+		}
+
+		hr = pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eConsole);
+		m_pending_audio_device_switch_back = false;
+
+		SAFE_RELEASE(pPolicyConfig);
+	}
+}
+
+void WASAPIStream::AlterVolumeOfAudioDevice(float volume_multiplier, bool set_should_switch_volume_back) {
+	if (!m_mm_device)
+		return;
+
+	IAudioEndpointVolume *pEndpointVolume = nullptr;
+	HRESULT hr =
+	    m_mm_device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, NULL, (void **)&pEndpointVolume);
+	if (FAILED(hr) || !pEndpointVolume)
+	{
+		ERROR_LOG(AUDIO, "Could not activate IAudioEndpointVolume. Volume won't be adjusted to compensate for halving of system audio signal.");
+		SAFE_RELEASE(pEndpointVolume);
 		return;
 	}
 
-	hr = pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eConsole);
+	float originalScalarVolume = 0.1f;
+	if (pEndpointVolume)
+	{
+		pEndpointVolume->GetMasterVolumeLevelScalar(&originalScalarVolume);
+		if (FAILED(hr) || !pEndpointVolume)
+		{
+			ERROR_LOG(AUDIO, "Could not get master volume level for selected audio output device. "
+				"Volume won't be adjusted to compensate for halving of system audio signal.");
+			SAFE_RELEASE(pEndpointVolume);
+			return;
+		}
+	}
+	if (originalScalarVolume == 0.0f)
+	{
+		INFO_LOG(AUDIO, "Not adjusting volume: audio device is muted.");
+		SAFE_RELEASE(pEndpointVolume);
+		return;
+	}
 
-	SAFE_RELEASE(pPolicyConfig);
+	float targetScalarVolume = originalScalarVolume * volume_multiplier;
+	if (targetScalarVolume > 1.0f)
+		targetScalarVolume = 1.0f;
+
+	hr = pEndpointVolume->SetMasterVolumeLevelScalar(targetScalarVolume, nullptr);
+	if (SUCCEEDED(hr))
+	{
+		INFO_LOG(AUDIO, "Applied +6dB compensation (clamped) to device volume. Original: %.2f, Target: %.2f", originalScalarVolume, targetScalarVolume);
+	}
+	else
+	{
+		WARN_LOG(AUDIO, "Failed to set compensated device volume. HRESULT: %s", wasapi_hresult_to_string(hr).c_str());
+		SAFE_RELEASE(pEndpointVolume);
+		return;
+	}
+
+	m_volume_multiplier_effectively_applied = targetScalarVolume / originalScalarVolume;
+	m_should_switch_volume_back = true;
+
+	SAFE_RELEASE(pEndpointVolume);
+	return;
+}
+void WASAPIStream::RestoreVolumeIfNeeded() {
+	if (m_should_switch_volume_back)
+	{
+		if (m_mm_device)
+		{
+			AlterVolumeOfAudioDevice((float)(1.0 / m_volume_multiplier_effectively_applied), false);
+		}
+		m_should_switch_volume_back = false;
+	}
 }
