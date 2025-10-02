@@ -169,15 +169,12 @@ void AudioConfigPane::LoadGUIValues()
 	m_RS_Hack_checkbox->SetValue(startup_params.bRSHACK);
 
 	m_mix_recorded_audio_checkbox->SetValue(startup_params.m_mixRecordedAudioIn);
-	m_audio_recording_device_choice->Enable(startup_params.m_mixRecordedAudioIn);
 	m_audio_recording_device_choice->SetStringSelection(StrToWxStr(startup_params.sAudioInputDevice));
 
 	m_mix_looped_back_audio_checkbox->SetValue(startup_params.m_mixLoopedBackAudioIn);
-	m_audio_loopback_device_choice->Enable(startup_params.m_mixLoopedBackAudioIn);
 	m_audio_loopback_device_choice->SetStringSelection(StrToWxStr(startup_params.sAudioLoopedBackOutputDevice));
 
 	m_switch_default_audio_output_device_during_gameplay_checkbox->SetValue(startup_params.m_SwitchDefaultAudioOutputDeviceDuringGameplay);
-	m_audio_output_device_to_switch_to_choice->Enable(startup_params.m_SwitchDefaultAudioOutputDeviceDuringGameplay);
 	m_audio_output_device_to_switch_to_choice->SetStringSelection(StrToWxStr(startup_params.sAudioOutputDeviceToSwitchTo));
 }
 
@@ -194,12 +191,13 @@ void AudioConfigPane::ToggleBackendSpecificControls(const std::string &backend)
 	m_volume_text->Enable(supports_volume_changes);
 
 	bool isExclusiveWASAPI = backend.find(BACKEND_EXCLUSIVE_WASAPI) != std::string::npos;
+
 	m_mix_recorded_audio_checkbox->Enable(isExclusiveWASAPI);
-	m_audio_recording_device_choice->Enable(isExclusiveWASAPI);
+	m_audio_recording_device_choice->Enable(isExclusiveWASAPI && m_mix_recorded_audio_checkbox->IsChecked());
 	m_mix_looped_back_audio_checkbox->Enable(isExclusiveWASAPI);
-	m_audio_loopback_device_choice->Enable(isExclusiveWASAPI);
+	m_audio_loopback_device_choice->Enable(isExclusiveWASAPI && m_mix_looped_back_audio_checkbox->IsChecked());
 	m_switch_default_audio_output_device_during_gameplay_checkbox->Enable(isExclusiveWASAPI);
-	m_audio_output_device_to_switch_to_choice->Enable(isExclusiveWASAPI);
+	m_audio_output_device_to_switch_to_choice->Enable(isExclusiveWASAPI && m_switch_default_audio_output_device_during_gameplay_checkbox->IsChecked());
 }
 
 void AudioConfigPane::BindEvents()
