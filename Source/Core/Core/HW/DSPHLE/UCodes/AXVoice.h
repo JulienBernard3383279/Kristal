@@ -459,12 +459,12 @@ s16 LowPassFilter(s16* samples, u32 count, s16 yn1, u16 a0, u16 b0)
 
 // Process 1ms of audio (for AX GC) or 3ms of audio (for AX Wii) from a PB and
 // mix it to the output buffers.
-void ProcessVoice(PB_TYPE& pb, const AXBuffers& buffers, u16 count, AXMixControl mctrl,
-	const s16* coeffs)
+bool ProcessVoice(PB_TYPE& pb, const AXBuffers& buffers, u16 count, AXMixControl mctrl,
+	const s16* coeffs, int pbIndex)
 {
 	// If the voice is not running, nothing to do.
 	if (!pb.running)
-		return;
+		return false;
 
 	// Read input samples, performing sample rate conversion if needed.
 	s16 samples[MAX_SAMPLES_PER_FRAME];
@@ -477,6 +477,14 @@ void ProcessVoice(PB_TYPE& pb, const AXBuffers& buffers, u16 count, AXMixControl
 			32767);  // -32768 ?
 		pb.vol_env.cur_volume += pb.vol_env.cur_volume_delta;
 	}
+
+	// Logging decoded samples, only possible because music AXVPB creations are prevented
+	/* std::ostringstream oss;
+	for (int i = 0; i < count; i++)
+	{
+		oss << samples[i] << " ";
+	}
+	INFO_LOG(AUDIO, oss.str().c_str());*/
 
 	// Optionally, execute a low pass filter
 	// TODO: LPF code is currently broken, causing Super Monkey Ball sound
@@ -502,6 +510,15 @@ void ProcessVoice(PB_TYPE& pb, const AXBuffers& buffers, u16 count, AXMixControl
 	if (MIX_ON(AUXA_L))
 		MixAdd(buffers.auxA_left, samples, count, &pb.mixer.auxA_left, &pb.dpop.auxA_left,
 			RAMP_ON(AUXA_L));
+
+	// Logging decoded samples, only possible because music AXVPB creations are prevented
+	/* std::ostringstream oss;
+	for (int i = 0; i < count; i++)
+	{
+		oss << buffers.auxA_left[i] << " ";
+	}
+	INFO_LOG(AUDIO, oss.str().c_str());*/
+
 	if (MIX_ON(AUXA_R))
 		MixAdd(buffers.auxA_right, samples, count, &pb.mixer.auxA_right, &pb.dpop.auxA_right,
 			RAMP_ON(AUXA_R));
@@ -589,6 +606,8 @@ void ProcessVoice(PB_TYPE& pb, const AXBuffers& buffers, u16 count, AXMixControl
 #undef WMCHAN_MIX_RAMP
 #undef WMCHAN_MIX_ON
 #endif
+
+	return true;
 }
 
 }  // namespace

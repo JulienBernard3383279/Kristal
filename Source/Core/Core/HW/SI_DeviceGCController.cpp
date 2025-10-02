@@ -173,6 +173,14 @@ bool CSIDevice_GCController::GetData(u32 &_Hi, u32 &_Low)
 bool CSIDevice_GCController::GetData(u32 &_Hi, u32 &_Low, std::chrono::high_resolution_clock::time_point when)
 {
 	GCPadStatus PadStatus = GetPadStatus(when);
+	bool bPressed = PadStatus.button & PAD_BUTTON_B;
+	if (bPressed && !bWasPressed)
+	{
+		auto now = std::chrono::system_clock::now();
+		auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+		INFO_LOG(AUDIO, "%lld - SI_BPress", us);
+	}
+	bWasPressed = bPressed;
 	return GetDataFromPadStatus(_Hi, _Low, PadStatus);
 }
 

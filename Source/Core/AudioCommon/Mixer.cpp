@@ -216,7 +216,15 @@ void CMixer::MixerFifo::PushSamples(const s16 *samples, u32 num_samples)
 
 void CMixer::PushSamples(const s16 *samples, u32 num_samples)
 {
+	//static int counter = 0;
+
 	m_dma_mixer.PushSamples(samples, num_samples);
+	//if (counter == 1000)
+	//{
+	//	counter = 0;
+	//}
+	//counter++;
+
 	int sample_rate = m_dma_mixer.GetInputSampleRate();
 	if (m_log_dsp_audio)
 		g_wave_writer_dsp.AddStereoSamplesBE(samples, num_samples, sample_rate);

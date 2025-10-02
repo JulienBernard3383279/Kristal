@@ -108,6 +108,24 @@ struct ChangeMusicVolumeQuery
 	u8 volume;
 };
 
+struct ReceiveSfxQuery
+{
+	u8 command;  // Should be CMD_PLAY_SFX (0x42)
+	u16 sfx_id;  // The sound effect ID
+	u8 volume;   // The volume
+	u8 pitch;    // The pitch
+	u8 channel; // The requested channel
+	u8 flags;   // The playback flags
+	u32 axpbPointer;
+};
+struct SFXLoadInfoPacket
+{
+	uint8_t command; // Should be 0x44
+	int32_t entrynum;
+	int32_t bankID;
+	char filename[48];
+};
+
 // Not sure if resetting is strictly needed, might be contained to the file
 #pragma pack()
 
@@ -148,4 +166,20 @@ template <> inline PlayMusicQuery Convert(u8* payload)
 	q.size = Common::FromBigEndian(q.size);
 	return q;
 }
+
+template <> inline ReceiveSfxQuery Convert(u8 *payload)
+{
+	auto q = *reinterpret_cast<ReceiveSfxQuery *>(payload);
+	q.sfx_id = Common::FromBigEndian(q.sfx_id);
+	q.axpbPointer = Common::FromBigEndian(q.axpbPointer); // For pointers too ?
+	return q;
+}
+template <> inline SFXLoadInfoPacket Convert(u8 *payload)
+{
+	auto q = *reinterpret_cast<SFXLoadInfoPacket *>(payload);
+	q.bankID = Common::FromBigEndian(q.bankID);
+	q.entrynum = Common::FromBigEndian(q.entrynum); // For pointers too ?
+	return q;
+}
+
 }; // namespace SlippiExiTypes

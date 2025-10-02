@@ -209,6 +209,27 @@ void SendAIBuffer(const short *samples, unsigned int num_samples)
 
 	if (pMixer && samples)
 	{
+		static int hadNonZeroSamplesBeforeCountdown = 0;
+		bool foundNonZeroSamples = false;
+		const int minSound = 50;
+		for (u32 i = 0; i < num_samples * 2; ++i)
+		{
+			if (abs(samples[i]) > minSound)
+			{
+				foundNonZeroSamples = true;
+				break;
+			}
+		}
+		if (foundNonZeroSamples && hadNonZeroSamplesBeforeCountdown == 0)
+		{
+			auto now = std::chrono::system_clock::now();
+			auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+			WARN_LOG(AUDIO, "%lld - AI_SendAIBuffer", us);
+		}
+		hadNonZeroSamplesBeforeCountdown = foundNonZeroSamples ? 4
+		                                   : (hadNonZeroSamplesBeforeCountdown == 0)
+		                                       ? 0 : (hadNonZeroSamplesBeforeCountdown - 1);
+
 		pMixer->PushSamples(samples, num_samples);
 	}
 

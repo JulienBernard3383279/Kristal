@@ -18,6 +18,12 @@
 #include <cmath>
 #include <algorithm>
 
+// TODO
+// Ensure volume control works in both modes
+// Ensure change of output device works in shared mode (see Windows SDK samples linked in
+// https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)
+// Handle Slippi jukebox
+
 #define SAFE_RELEASE(p)                                                                                                \
 	{                                                                                                                  \
 		if ((p))                                                                                                       \
@@ -104,11 +110,6 @@ DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0
    >In addition, the IAudioClient::Initialize method supports an AUDCLNT_STREAMFLAGS_EVENTCALLBACK flag that enables an application's
    >buffer-servicing thread to schedule its execution to occur when a new buffer becomes available from the audio device.
    https://learn.microsoft.com/en-us/windows/win32/coreaudio/exclusive-mode-streams */
-
-// TODO
-// Ensure volume control works in both modes
-// Ensure change of output device works in shared mode (see Windows SDK samples linked in
-// https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)
 
 bool WASAPIStream::Start()
 {
@@ -546,6 +547,26 @@ void WASAPIStream::SoundLoop()
 				}
 
 				m_mixer->Mix(reinterpret_cast<s16 *>(data), frames_in_buffer);
+				{
+					static bool hadNonZeroSamplesBefore = false;
+					bool foundNonZeroSamples = false;
+					const int minSound = 1000;
+					for (u32 i = 0; i < frames_in_buffer * 2; ++i)
+					{
+						if (abs(reinterpret_cast<s16 *>(data)[i]) > minSound)
+						{
+							foundNonZeroSamples = true;
+							break;
+						}
+					}
+					if (foundNonZeroSamples && !hadNonZeroSamplesBefore)
+					{
+						auto now = std::chrono::system_clock::now();
+						auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+						//ERROR_LOG(AUDIO, "%lld - Non zero samples fed to WASAPI", us);
+					}
+					hadNonZeroSamplesBefore = foundNonZeroSamples;
+				}
 
 				// Ideally we should not make a smaller signal by applying the volume here, in exclusive mode.
 				// We should be sending to the device the volume we want, provided it supports volume adjustment, and send a full range signal.

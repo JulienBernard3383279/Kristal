@@ -12,6 +12,8 @@
 #include "Core/HW/DSP.h"
 #include "Core/HW/DSPHLE/UCodes/AXStructs.h"
 
+#include <chrono>
+
 #define AX_GC
 #include "Core/HW/DSPHLE/UCodes/AXVoice.h"
 
@@ -77,6 +79,11 @@ void AXUCode::SignalWorkEnd()
 
 void AXUCode::HandleCommandList()
 {
+	static std::array<int, 50> endIndexes{};
+	static int indexCounter = 0;
+
+	logOutputs = false;
+
 	// Temp variables for addresses computation
 	u16 addr_hi, addr_lo;
 	u16 addr2_hi, addr2_lo;
@@ -84,18 +91,36 @@ void AXUCode::HandleCommandList()
 
 	u32 pb_addr = 0;
 
+	int index = (int)(std::find(m_cmdlist, m_cmdlist + m_cmdlist_size, CMD_END) - m_cmdlist);
+	if (index != 25)
+		INFO_LOG(AUDIO, "End cmd index: %i", index);
+	/* endIndexes[indexCounter++] = index;
+	if (indexCounter == endIndexes.size())
+	{
+		std::ostringstream oss;
+		for (int endIndex : endIndexes)
+			oss << endIndex << " ";
+		INFO_LOG(AUDIO, oss.str().c_str());
+		indexCounter = 0;
+	}*/
+
 #if 0
 	INFO_LOG(DSPHLE, "Command list:");
 	for (u32 i = 0; m_cmdlist[i] != CMD_END; ++i)
-		INFO_LOG(DSPHLE, "%04x", m_cmdlist[i]);
+	{
+		std::string str = to_string((CmdType)m_cmdlist[i]);
+		INFO_LOG(DSPHLE, str.c_str());
+	}
 	INFO_LOG(DSPHLE, "-------------");
 #endif
 
 	u32 curr_idx = 0;
 	bool end = false;
+	INFO_LOG(DSPHLE, "---");
 	while (!end)
 	{
 		u16 cmd = m_cmdlist[curr_idx++];
+		//INFO_LOG(DSPHLE, to_string((CmdType)cmd).c_str());
 
 		switch (cmd)
 		{
@@ -126,8 +151,14 @@ void AXUCode::HandleCommandList()
 			break;
 
 		case CMD_PROCESS:
+		{
+			/*static const auto start = std::chrono::steady_clock::now();
+			auto now = std::chrono::steady_clock::now();
+			auto us = std::chrono::duration_cast<std::chrono::microseconds>(now - start).count();
+			WARN_LOG(AUDIO, "Process PB list at %lld", us);*/
 			ProcessPBList(pb_addr);
 			break;
+		}
 
 		case CMD_MIX_AUXA:
 		case CMD_MIX_AUXB:
@@ -386,6 +417,23 @@ void AXUCode::DownloadAndMixWithVolume(u32 addr, u16 vol_main, u16 vol_auxa, u16
 	int** buffers[3] = { buffers_main, buffers_auxa, buffers_auxb };
 	u16 volumes[3] = { vol_main, vol_auxa, vol_auxb };
 
+	bool mainBufferHadNonZeroSamples = false;
+	for (int i = 0; i < 3; i++)
+	{
+		for (u32 j = 0; j < 5 * 32; ++j)
+		{
+			if (buffers_main[i][j] != 0)
+			{
+				mainBufferHadNonZeroSamples = true;
+				auto now = std::chrono::system_clock::now();
+				auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+				WARN_LOG(AUDIO, "Mixing non zero samples in DownloadAndMixWithVolume at %lld", us);
+				break;
+			}
+		}
+		if (mainBufferHadNonZeroSamples) break;
+	}
+
 	for (u32 i = 0; i < 3; ++i)
 	{
 		int* ptr = (int*)HLEMemory_Get_Pointer(addr);
@@ -405,13 +453,20 @@ void AXUCode::DownloadAndMixWithVolume(u32 addr, u16 vol_main, u16 vol_auxa, u16
 
 void AXUCode::ProcessPBList(u32 pb_addr)
 {
+	static std::array<int, 50> counts{};
+	static int pbCountCounter = 0;
+
 	// Samples per millisecond. In theory DSP sampling rate can be changed from
 	// 32KHz to 48KHz, but AX always process at 32KHz.
 	const u32 spms = 32;
 
 	AXPB pb;
 
-	while (pb_addr)
+	int pbCount = 0;
+
+	int pbIndex = 0;
+
+	while (pb_addr) // Melee: always a list of 64
 	{
 		AXBuffers buffers = { { m_samples_left, m_samples_right, m_samples_surround, m_samples_auxA_left,
 			m_samples_auxA_right, m_samples_auxA_surround, m_samples_auxB_left,
@@ -422,13 +477,17 @@ void AXUCode::ProcessPBList(u32 pb_addr)
 		u32 updates_addr = HILO_TO_32(pb.updates.data);
 		u16* updates = (u16*)HLEMemory_Get_Pointer(updates_addr);
 
+		bool voiceActiveInNext5Ms = false;
+
 		for (int curr_ms = 0; curr_ms < 5; ++curr_ms)
 		{
 			ApplyUpdatesForMs(curr_ms, (u16*)&pb, pb.updates.num_updates, updates);
 
-			ProcessVoice(pb, buffers, spms, ConvertMixerControl(pb.mixer_control),
-				m_coeffs_available ? m_coeffs : nullptr);
+			bool voiceActiveThisMs = ProcessVoice(pb, buffers, spms, ConvertMixerControl(pb.mixer_control),
+				m_coeffs_available ? m_coeffs : nullptr, pbIndex);
 
+			voiceActiveInNext5Ms = voiceActiveInNext5Ms || voiceActiveThisMs;
+			
 			// Forward the buffers
 			for (size_t i = 0; i < ArraySize(buffers.ptrs); ++i)
 				buffers.ptrs[i] += spms;
@@ -436,7 +495,25 @@ void AXUCode::ProcessPBList(u32 pb_addr)
 
 		WritePB(pb_addr, pb);
 		pb_addr = HILO_TO_32(pb.next_pb);
+		if (voiceActiveInNext5Ms)
+		{
+			logOutputs = true;
+			pbCount++;
+		}
+
+		pbIndex++;
+
 	}
+
+	/* counts[pbCountCounter++] = pbCount;
+	if (pbCountCounter == counts.size())
+	{
+		std::ostringstream oss;
+		for (int endIndex : counts)
+			oss << endIndex << " ";
+		INFO_LOG(AUDIO, oss.str().c_str());
+		pbCountCounter = 0;
+	}*/ // We log count of active voices now
 }
 
 void AXUCode::MixAUXSamples(int aux_id, u32 write_addr, u32 read_addr)
@@ -514,6 +591,10 @@ void AXUCode::OutputSamples(u32 lr_addr, u32 surround_addr)
 	// 32 samples per ms, 5 ms, 2 channels
 	short buffer[5 * 32 * 2];
 
+	
+	// Logging outputs for debug, not possible even with the music calls killed before AXVPB creation, AX runs anyway
+	std::ostringstream oss;
+
 	// Output samples clamped to 16 bits and interlaced RLRLRLRLRL...
 	for (u32 i = 0; i < 5 * 32; ++i)
 	{
@@ -522,9 +603,47 @@ void AXUCode::OutputSamples(u32 lr_addr, u32 surround_addr)
 
 		buffer[2 * i + 0] = Common::swap16(right);
 		buffer[2 * i + 1] = Common::swap16(left);
+
+		oss << left << " ";
+		oss << right << " ";
+
+		/* if (i % 32 == 31) // Split in 5 prints because Dolphin log limits ?
+		{
+			if (logOutputs)
+				INFO_LOG(AUDIO, oss.str().c_str());
+			oss = std::ostringstream{};
+		}*/
 	}
 
 	memcpy(HLEMemory_Get_Pointer(lr_addr), buffer, sizeof(buffer));
+
+
+	// Test latency to AX HLE output
+	static int hadNonZeroSamplesBeforeCountdown = 0;
+	bool foundNonZeroSamples = false;
+	const int minSound = 50;
+	for (u32 i = 0; i < 5 * 32; ++i)
+	{
+		if (abs(buffer[2 * i]) > minSound || abs(buffer[2 * i + 1]) > minSound)
+		{
+			foundNonZeroSamples = true;
+			break;
+		}
+		if (abs(surround_buffer[i]) > minSound)
+		{
+			foundNonZeroSamples = true;
+			break;
+		}
+	}
+	if (foundNonZeroSamples && hadNonZeroSamplesBeforeCountdown==0)
+	{
+		auto now = std::chrono::system_clock::now();
+		auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+		ERROR_LOG(AUDIO, "%lld - AX_OutputSamples", us);
+	}
+	hadNonZeroSamplesBeforeCountdown = foundNonZeroSamples ? 4
+	                                   : (hadNonZeroSamplesBeforeCountdown == 0)
+	                                       ? 0 : (hadNonZeroSamplesBeforeCountdown - 1);
 }
 
 void AXUCode::MixAUXBLR(u32 ul_addr, u32 dl_addr)

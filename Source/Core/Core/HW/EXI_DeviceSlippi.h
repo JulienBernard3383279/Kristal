@@ -59,6 +59,9 @@ class CEXISlippi : public IEXIDevice
 		CMD_RECEIVE_FOD_INFO = 0x3F,
 		CMD_RECEIVE_DL_INFO = 0x40,
 		CMD_RECEIVE_PS_INFO = 0x41,
+		CMD_RECEIVE_SFX = 0x42, // Should be in misc, TODO fix eventually
+		CMD_RECEIVE_LOG_HSD_SYNTHSFXPLAYWITHGROUP = 0x43, // Should be in misc, TODO fix eventually
+		CMD_RECEIVE_FILENAME_SOUNDID_PAIR = 0x44,
 
 		CMD_RECEIVE_BONES = 0x60,
 
@@ -194,6 +197,9 @@ class CEXISlippi : public IEXIDevice
 	    {CMD_GET_RANK, 0x0},
 	    {CMD_FETCH_RANK, 0x0},
 	    {CMD_GET_RANK_VISIBILITY, 0x0},
+		{CMD_RECEIVE_SFX, 15},
+		{CMD_RECEIVE_LOG_HSD_SYNTHSFXPLAYWITHGROUP, 0},
+		{CMD_RECEIVE_FILENAME_SOUNDID_PAIR, 56}
 	};
 
 	struct WriteMessage

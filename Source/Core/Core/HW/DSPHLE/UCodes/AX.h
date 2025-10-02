@@ -51,7 +51,10 @@ enum AXMixControl
 
 class AXUCode : public UCodeInterface
 {
-public:
+  private:
+	bool logOutputs = false;
+
+  public:
 	AXUCode(DSPHLE* dsphle, u32 crc);
 	virtual ~AXUCode();
 
@@ -148,4 +151,53 @@ private:
 		CMD_UNK_12 = 0x12,
 		CMD_SEND_AUX_AND_MIX = 0x13,
 	};
+
+	inline static std::string to_string(CmdType cmdType)
+	{
+		switch (cmdType)
+		{
+			case CMD_SETUP:
+			return "CMD_SETUP";
+		case CMD_DL_AND_VOL_MIX:
+			return "CMD_DL_AND_VOL_MIX";
+		case CMD_PB_ADDR:
+			return "CMD_PB_ADDR";
+		case CMD_PROCESS:
+			return "CMD_PROCESS";
+		case CMD_MIX_AUXA:
+			return "CMD_MIX_AUXA";
+		case CMD_MIX_AUXB:
+			return "CMD_MIX_AUXB";
+		case CMD_UPLOAD_LRS:
+			return "CMD_UPLOAD_LRS";
+		case CMD_SET_LR:
+			return "CMD_SET_LR";
+		case CMD_UNK_08:
+			return "CMD_UNK_08";
+		case CMD_MIX_AUXB_NOWRITE:
+			return "CMD_MIX_AUXB_NOWRITE";
+		case CMD_COMPRESSOR_TABLE_ADDR:
+			return "CMD_COMPRESSOR_TABLE_ADDR";
+		case CMD_UNK_0B:
+			return "CMD_UNK_0B";
+		case CMD_UNK_0C:
+			return "CMD_UNK_0C";
+		case CMD_MORE:
+			return "CMD_MORE";
+		case CMD_OUTPUT:
+			return "CMD_OUTPUT";
+		case CMD_END:
+			return "CMD_END";
+		case CMD_MIX_AUXB_LR:
+			return "CMD_MIX_AUXB_LR";
+		case CMD_SET_OPPOSITE_LR:
+			return "CMD_SET_OPPOSITE_LR";
+		case CMD_UNK_12:
+			return "CMD_UNK_12";
+		case CMD_SEND_AUX_AND_MIX:
+			return "CMD_SEND_AUX_AND_MIX";
+		default:
+			return "Unknown";
+		}
+	}
 };

@@ -10,7 +10,11 @@
 
 class CSIDevice_GCController : public ISIDevice
 {
-protected:
+  private:
+	bool bWasPressed = false;
+
+
+  protected:
 	// Commands
 	enum EBufferCommands
 	{

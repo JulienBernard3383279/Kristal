@@ -3450,6 +3450,32 @@ void CEXISlippi::DMAWrite(u32 _uAddr, u32 _uSize)
 			slprs_fetch_match_result(slprs_exi_device_ptr, recentMmResult.id.c_str());
 			break;
 		}
+		case CMD_RECEIVE_SFX:
+		{
+			auto args = SlippiExiTypes::Convert<SlippiExiTypes::ReceiveSfxQuery>(&memPtr[bufLoc]);
+
+			auto now = std::chrono::system_clock::now();
+			auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+			INFO_LOG(AUDIO, "%lld - EXI_SFX_PlaySFX: %u. Pointer (dec): %lu", us, args.sfx_id, args.axpbPointer);
+
+			break;
+		}
+		case CMD_RECEIVE_LOG_HSD_SYNTHSFXPLAYWITHGROUP:
+		{
+			auto now = std::chrono::system_clock::now();
+			auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+			NOTICE_LOG(AUDIO, "%lld - EXI_HSD_SynthSFXPlayWithGroup", us);
+
+			break;
+		}
+		case CMD_RECEIVE_FILENAME_SOUNDID_PAIR:
+		{
+			auto args = SlippiExiTypes::Convert<SlippiExiTypes::SFXLoadInfoPacket>(&memPtr[bufLoc]);
+
+			std::string fileNameStr = std::string(args.filename, sizeof(args.filename));
+			INFO_LOG(AUDIO, "Filename: %s, entryNum: %u, bankID: %u", fileNameStr.c_str(), args.entrynum, args.bankID);
+			break;
+		}
 		default:
 			writeToFileAsync(&memPtr[bufLoc], payloadLen + 1, "");
 			m_slippiserver->write(&memPtr[bufLoc], payloadLen + 1);
