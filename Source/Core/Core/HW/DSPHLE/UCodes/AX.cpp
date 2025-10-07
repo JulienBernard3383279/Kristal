@@ -12,6 +12,8 @@
 #include "Core/HW/DSP.h"
 #include "Core/HW/DSPHLE/UCodes/AXStructs.h"
 
+#include "Core/HW/Exi_DeviceSlippi.h"
+
 #include <chrono>
 
 #define AX_GC
@@ -639,7 +641,8 @@ void AXUCode::OutputSamples(u32 lr_addr, u32 surround_addr)
 	{
 		auto now = std::chrono::system_clock::now();
 		auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-		ERROR_LOG(AUDIO, "%lld - AX_OutputSamples", us);
+		//ERROR_LOG(AUDIO, "%lld - AX_OutputSamples", us);
+		awaitingLogAIInitDMA = true;
 	}
 	hadNonZeroSamplesBeforeCountdown = foundNonZeroSamples ? 4
 	                                   : (hadNonZeroSamplesBeforeCountdown == 0)

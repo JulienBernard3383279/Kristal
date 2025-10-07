@@ -25,6 +25,9 @@
 
 extern bool g_needInputForFrame;
 
+extern bool awaitingLogAIInitDMA;
+extern bool calledAIInitDMA;
+
 // Emulated Slippi device used to receive and respond to in-game messages
 class CEXISlippi : public IEXIDevice
 {
@@ -59,9 +62,6 @@ class CEXISlippi : public IEXIDevice
 		CMD_RECEIVE_FOD_INFO = 0x3F,
 		CMD_RECEIVE_DL_INFO = 0x40,
 		CMD_RECEIVE_PS_INFO = 0x41,
-		CMD_RECEIVE_SFX = 0x42, // Should be in misc, TODO fix eventually
-		CMD_RECEIVE_LOG_HSD_SYNTHSFXPLAYWITHGROUP = 0x43, // Should be in misc, TODO fix eventually
-		CMD_RECEIVE_FILENAME_SOUNDID_PAIR = 0x44,
 
 		CMD_RECEIVE_BONES = 0x60,
 
@@ -110,7 +110,13 @@ class CEXISlippi : public IEXIDevice
 		CMD_PREMADE_TEXT_LOAD = 0xE2,
 		CMD_GET_RANK = 0xE3,
 		CMD_FETCH_RANK = 0xE4,
-		CMD_GET_RANK_VISIBILITY = 0xE5
+		CMD_GET_RANK_VISIBILITY = 0xE5,
+
+		CMD_RECEIVE_SFX = 0x42,
+		CMD_RECEIVE_LOG_HSD_SYNTHSFXPLAYWITHGROUP = 0x43,
+		CMD_RECEIVE_FILENAME_SOUNDID_PAIR = 0x44,
+		CMD_RECEIVE_LOG_AIINITDMA = 0x45,
+		CMD_RECEIVE_LOG_AXSYNCPBS = 0x46,
 	};
 
 	enum
@@ -199,7 +205,9 @@ class CEXISlippi : public IEXIDevice
 	    {CMD_GET_RANK_VISIBILITY, 0x0},
 		{CMD_RECEIVE_SFX, 15},
 		{CMD_RECEIVE_LOG_HSD_SYNTHSFXPLAYWITHGROUP, 0},
-		{CMD_RECEIVE_FILENAME_SOUNDID_PAIR, 56}
+		{CMD_RECEIVE_FILENAME_SOUNDID_PAIR, 56},
+		{CMD_RECEIVE_LOG_AIINITDMA, 8},
+	    {CMD_RECEIVE_LOG_AXSYNCPBS, 0}
 	};
 
 	struct WriteMessage

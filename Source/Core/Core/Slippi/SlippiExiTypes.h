@@ -125,6 +125,12 @@ struct SFXLoadInfoPacket
 	int32_t bankID;
 	char filename[48];
 };
+struct AIInitDMAPacket
+{
+	u8 command; // Should be 0x45
+	u32 bufferPtr;
+	u32 size;
+};
 
 // Not sure if resetting is strictly needed, might be contained to the file
 #pragma pack()
@@ -179,6 +185,13 @@ template <> inline SFXLoadInfoPacket Convert(u8 *payload)
 	auto q = *reinterpret_cast<SFXLoadInfoPacket *>(payload);
 	q.bankID = Common::FromBigEndian(q.bankID);
 	q.entrynum = Common::FromBigEndian(q.entrynum); // For pointers too ?
+	return q;
+}
+template <> inline AIInitDMAPacket Convert(u8 *payload)
+{
+	auto q = *reinterpret_cast<AIInitDMAPacket *>(payload);
+	q.bufferPtr = Common::FromBigEndian(q.bufferPtr);
+	q.size = Common::FromBigEndian(q.size);
 	return q;
 }
 

@@ -548,9 +548,9 @@ void WASAPIStream::SoundLoop()
 
 				m_mixer->Mix(reinterpret_cast<s16 *>(data), frames_in_buffer);
 				{
-					static bool hadNonZeroSamplesBefore = false;
+					static int hadNonZeroSamplesBeforeCountdown = 0;
 					bool foundNonZeroSamples = false;
-					const int minSound = 1000;
+					const int minSound = 50;
 					for (u32 i = 0; i < frames_in_buffer * 2; ++i)
 					{
 						if (abs(reinterpret_cast<s16 *>(data)[i]) > minSound)
@@ -559,13 +559,15 @@ void WASAPIStream::SoundLoop()
 							break;
 						}
 					}
-					if (foundNonZeroSamples && !hadNonZeroSamplesBefore)
+					if (foundNonZeroSamples && hadNonZeroSamplesBeforeCountdown == 0)
 					{
 						auto now = std::chrono::system_clock::now();
 						auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-						//ERROR_LOG(AUDIO, "%lld - Non zero samples fed to WASAPI", us);
+						//ERROR_LOG(AUDIO, "%lld - WASAPI NonZeroSamplesFedToWASAPI", us);
 					}
-					hadNonZeroSamplesBefore = foundNonZeroSamples;
+					hadNonZeroSamplesBeforeCountdown = foundNonZeroSamples ? 4
+					                                   : (hadNonZeroSamplesBeforeCountdown == 0)
+					                                       ? 0 : (hadNonZeroSamplesBeforeCountdown - 1);
 				}
 
 				// Ideally we should not make a smaller signal by applying the volume here, in exclusive mode.

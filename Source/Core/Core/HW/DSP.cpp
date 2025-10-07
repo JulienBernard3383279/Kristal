@@ -37,6 +37,8 @@
 #include "Core/PowerPC/JitInterface.h"
 #include "Core/PowerPC/PowerPC.h"
 
+#include "Core/HW/EXI_DeviceSlippi.h"
+
 namespace DSP
 {
 // register offsets
@@ -453,6 +455,10 @@ void UpdateDSPSlice(int cycles)
 // This happens at 4 khz, since 32 bytes at 4khz = 4 bytes at 32 khz (16bit stereo pcm)
 void UpdateAudioDMA()
 {
+	static bool armed = false;
+
+	static int sendAIBufferCounter = 0;
+
 	static short zero_samples[8 * 2] = { 0 };
 	if (g_audioDMA.AudioDMAControl.Enable)
 	{
@@ -460,25 +466,56 @@ void UpdateAudioDMA()
 		// external audio fifo in the emulator, to be mixed with the disc
 		// streaming output.
 
+		bool noBlockLeft = false;
+
 		if (g_audioDMA.remaining_blocks_count != 0)
 		{
+			if (armed)
+			{
+				void *address = Memory::GetPointer(g_audioDMA.SourceAddress);
+				AudioCommon::SendAIBuffer((short *)address, g_audioDMA.AudioDMAControl.NumBlocks * 8);
+				armed = false;
+			}
+
 			g_audioDMA.remaining_blocks_count--;
 			g_audioDMA.current_source_address += 32;
 		}
 
 		if (g_audioDMA.remaining_blocks_count == 0)
 		{
+			noBlockLeft = true;
+
 			g_audioDMA.current_source_address = g_audioDMA.SourceAddress;
 			g_audioDMA.remaining_blocks_count = g_audioDMA.AudioDMAControl.NumBlocks;
 
 			if (g_audioDMA.remaining_blocks_count != 0)
 			{
-				// We make the samples ready as soon as possible
-				void* address = Memory::GetPointer(g_audioDMA.SourceAddress);
-				AudioCommon::SendAIBuffer((short*)address, g_audioDMA.AudioDMAControl.NumBlocks * 8);
+				// We make the samples ready as soon as possible <- do you ?
+				
+				//void* address = Memory::GetPointer(g_audioDMA.SourceAddress);
+				//AudioCommon::SendAIBuffer((short*)address, g_audioDMA.AudioDMAControl.NumBlocks * 8);
+				armed = true;
 			}
 			GenerateDSPInterrupt(DSP::INT_AID);
 		}
+
+		/*if (calledAIInitDMA)
+		{
+			if (sendAIBufferCounter == 0)
+			{
+				sendAIBufferCounter = 30;
+			}
+			else
+			{
+				sendAIBufferCounter--;
+				if (sendAIBufferCounter==0) calledAIInitDMA = false;
+			}
+
+			auto now = std::chrono::system_clock::now();
+			auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+			NOTICE_LOG(AUDIO, "%lld - UpdateAudioDMA %u %u %s", us, g_audioDMA.SourceAddress,
+			           g_audioDMA.AudioDMAControl.NumBlocks, (noBlockLeft ? "NoBlockLeft" : ""));
+		}*/
 	}
 	else
 	{

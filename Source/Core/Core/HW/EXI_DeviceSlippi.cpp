@@ -50,6 +50,10 @@
 
 // #define LOCAL_TESTING
 
+bool awaitingLogAIInitDMA = false;
+bool calledAIInitDMA = false;
+bool awaitingAXSyncPBs = false;
+
 static std::unordered_map<u8, std::string> slippi_names;
 static std::unordered_map<u8, std::string> slippi_connect_codes;
 
@@ -3250,6 +3254,8 @@ void CEXISlippi::handleGetRank()
 
 void CEXISlippi::DMAWrite(u32 _uAddr, u32 _uSize)
 {
+	static int aiInitDmaCounter = 0;
+
 	u8 *memPtr = Memory::GetPointer(_uAddr);
 	// INFO_LOG(SLIPPI, "DMA Write: %x, Size: %d", _uAddr, _uSize);
 
@@ -3458,6 +3464,8 @@ void CEXISlippi::DMAWrite(u32 _uAddr, u32 _uSize)
 			auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
 			INFO_LOG(AUDIO, "%lld - EXI_SFX_PlaySFX: %u. Pointer (dec): %lu", us, args.sfx_id, args.axpbPointer);
 
+			awaitingAXSyncPBs = true;
+
 			break;
 		}
 		case CMD_RECEIVE_LOG_HSD_SYNTHSFXPLAYWITHGROUP:
@@ -3474,6 +3482,46 @@ void CEXISlippi::DMAWrite(u32 _uAddr, u32 _uSize)
 
 			std::string fileNameStr = std::string(args.filename, sizeof(args.filename));
 			INFO_LOG(AUDIO, "Filename: %s, entryNum: %u, bankID: %u", fileNameStr.c_str(), args.entrynum, args.bankID);
+			break;
+		}
+		case CMD_RECEIVE_LOG_AIINITDMA:
+		{
+			if (awaitingLogAIInitDMA)
+			{
+				auto args = SlippiExiTypes::Convert<SlippiExiTypes::AIInitDMAPacket>(&memPtr[bufLoc]);
+
+				/* if (aiInitDmaCounter == 0)
+				{
+					calledAIInitDMA = true;
+					aiInitDmaCounter = 1;
+				}
+				else
+				{
+					aiInitDmaCounter = 0;
+					awaitingLogAIInitDMA = false;
+				}*/
+
+				calledAIInitDMA = true;
+				awaitingLogAIInitDMA = false;
+
+				auto now = std::chrono::system_clock::now();
+				auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+				NOTICE_LOG(AUDIO, "%lld - EXI_AIInitDMA %u %u", us, args.bufferPtr, args.size);
+			}
+
+			break;
+		}
+		case CMD_RECEIVE_LOG_AXSYNCPBS:
+		{
+			if (awaitingAXSyncPBs)
+			{
+				awaitingAXSyncPBs = false;
+
+				auto now = std::chrono::system_clock::now();
+				auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+				INFO_LOG(AUDIO, "%lld - EXI_AXSyncPBs", us);
+			}
+
 			break;
 		}
 		default:

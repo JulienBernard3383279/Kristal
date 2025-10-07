@@ -224,7 +224,7 @@ void SendAIBuffer(const short *samples, unsigned int num_samples)
 		{
 			auto now = std::chrono::system_clock::now();
 			auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-			WARN_LOG(AUDIO, "%lld - AI_SendAIBuffer", us);
+			//WARN_LOG(AUDIO, "%lld - AI_SendAIBuffer", us);
 		}
 		hadNonZeroSamplesBeforeCountdown = foundNonZeroSamples ? 4
 		                                   : (hadNonZeroSamplesBeforeCountdown == 0)
