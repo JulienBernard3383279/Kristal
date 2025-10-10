@@ -452,12 +452,17 @@ void UpdateDSPSlice(int cycles)
 	}
 }
 
+#define OPTIMIZATION__ASSUME_NO_DMA_RACE 1
+
 // This happens at 4 khz, since 32 bytes at 4khz = 4 bytes at 32 khz (16bit stereo pcm)
 void UpdateAudioDMA()
 {
+	#if OPTIMIZATION__ASSUME_NO_DMA_RACE
 	static bool armed = false;
+	// Could save like 0.1ms by reacting to AIInitDMA over SFX rather than waiting for the next UpdateDMA call after AIInitDMA...
+	#endif
 
-	static int sendAIBufferCounter = 0;
+	//static int sendAIBufferCounter = 0;
 
 	static short zero_samples[8 * 2] = { 0 };
 	if (g_audioDMA.AudioDMAControl.Enable)
@@ -466,16 +471,18 @@ void UpdateAudioDMA()
 		// external audio fifo in the emulator, to be mixed with the disc
 		// streaming output.
 
-		bool noBlockLeft = false;
+		//bool noBlockLeft = false;
 
 		if (g_audioDMA.remaining_blocks_count != 0)
 		{
+			#if OPTIMIZATION__ASSUME_NO_DMA_RACE
 			if (armed)
 			{
 				void *address = Memory::GetPointer(g_audioDMA.SourceAddress);
 				AudioCommon::SendAIBuffer((short *)address, g_audioDMA.AudioDMAControl.NumBlocks * 8);
 				armed = false;
 			}
+			#endif
 
 			g_audioDMA.remaining_blocks_count--;
 			g_audioDMA.current_source_address += 32;
@@ -483,7 +490,7 @@ void UpdateAudioDMA()
 
 		if (g_audioDMA.remaining_blocks_count == 0)
 		{
-			noBlockLeft = true;
+			//noBlockLeft = true;
 
 			g_audioDMA.current_source_address = g_audioDMA.SourceAddress;
 			g_audioDMA.remaining_blocks_count = g_audioDMA.AudioDMAControl.NumBlocks;
@@ -492,9 +499,12 @@ void UpdateAudioDMA()
 			{
 				// We make the samples ready as soon as possible <- do you ?
 				
-				//void* address = Memory::GetPointer(g_audioDMA.SourceAddress);
-				//AudioCommon::SendAIBuffer((short*)address, g_audioDMA.AudioDMAControl.NumBlocks * 8);
+				#if OPTIMIZATION__ASSUME_NO_DMA_RACE
 				armed = true;
+				#else
+				void* address = Memory::GetPointer(g_audioDMA.SourceAddress);
+				AudioCommon::SendAIBuffer((short*)address, g_audioDMA.AudioDMAControl.NumBlocks * 8);
+				#endif
 			}
 			GenerateDSPInterrupt(DSP::INT_AID);
 		}
