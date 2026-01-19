@@ -19,9 +19,11 @@ enum ControllerTypes
 	CONTROLLER_WIRELESS = 2
 };
 
+// < Additions over mainline
 void ResetAdapterIfNecessary();
 bool IsReadingAtReducedRate();
 double ReadRate();
+// />
 
 void Init();
 void ResetRumble();
@@ -29,11 +31,13 @@ void Shutdown();
 void SetAdapterCallback(std::function<void(void)> func);
 void StartScanThread();
 void StopScanThread();
+
 GCPadStatus Input(int chan, std::chrono::high_resolution_clock::time_point *tp=nullptr);
+
 void Output(int chan, u8 rumble_command);
 bool IsDetected();
 bool IsDriverDetected();
-bool DeviceConnected(int chan);
+bool DeviceConnected(int chan); // ResetDeviceType in mainline
 bool UseAdapter();
 
 }  // end of namespace GCAdapter
