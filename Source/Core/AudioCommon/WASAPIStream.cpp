@@ -24,6 +24,8 @@
 // https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)
 // Handle Slippi jukebox
 
+//TODO 2026: Use exclusive timer-driven, bypass the Dolphin mixer entirely,
+// feed the audio coming from the game directly to the WASAPI buffer
 #define SAFE_RELEASE(p)                                                                                                \
 	{                                                                                                                  \
 		if ((p))                                                                                                       \
