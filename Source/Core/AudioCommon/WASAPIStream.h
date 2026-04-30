@@ -74,7 +74,13 @@ public:
 
 	bool m_should_switch_volume_back = false;
 	float m_original_volume_db = 0.0f;
-	void AlterVolumeOfAudioDevice(float db_change, bool store_original_and_set_flag);
+	// True if AlterVolumeOfAudioDevice successfully applied the full +6 dB boost.
+	// Controls whether CaptureAudioAndMix halves both signals before summing.
+	bool m_volume_boost_applied = false;
+	// Original volume of the sacrificial endpoint, restored on Stop().
+	float m_sacrificial_device_original_volume_db = 0.0f;
+	bool m_should_restore_sacrificial_volume = false;
+	bool AlterVolumeOfAudioDevice(float db_change, bool store_original_and_set_flag);
 	void RestoreVolumeIfNeeded();
 
 	// --- Timer-driven exclusive direct-push path ---

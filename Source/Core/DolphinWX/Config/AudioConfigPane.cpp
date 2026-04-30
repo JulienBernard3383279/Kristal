@@ -51,9 +51,9 @@ void AudioConfigPane::InitializeGUI()
 	m_audio_backend_choice->SetToolTip(_("Changing this will have no effect while the emulator is running."));
 	m_audio_margin_spinctrl =
 		new wxSpinCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 1, 30);
-	m_audio_margin_spinctrl->SetToolTip(_("Sets the target audio buffer margin (in ms). Higher values "
+	m_audio_margin_spinctrl->SetToolTip(_("Sets the target audio buffer safety margin (in ms). Higher values "
 										  "may reduce audio crackling. Certain backends only."));
-	m_audio_margin_label = new wxStaticText(this, wxID_ANY, _("Margin (ms):"));
+	m_audio_margin_label = new wxStaticText(this, wxID_ANY, _("Audio safety margin (ms):"));
 
 	m_mix_recorded_audio_checkbox = new wxCheckBox(this, wxID_ANY, _("Pass-through audio from recording device"));
 	m_mix_recorded_audio_checkbox->SetToolTip(_("Mixes in audio from an audio input device. "

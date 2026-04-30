@@ -285,8 +285,12 @@ bool WASAPIStream::Start()
 		// Similarly, must switch back only after the exclusive stream is closed
 		if (SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
 		{
-			AlterVolumeOfAudioDevice(6.0f, true); // +6dB i.e *2, to compensate for system signal halved
+			m_volume_boost_applied = AlterVolumeOfAudioDevice(6.0f, true); // +6dB i.e *2, to compensate for system signal halved
 			SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(SConfig::GetInstance().sAudioOutputDeviceToSwitchTo, true);
+		}
+		else
+		{
+			m_volume_boost_applied = false;
 		}
 
 		// Fixed 2048-frame buffer at 48 kHz (~42.67 ms). The actual buffered audio level is
@@ -1254,18 +1258,35 @@ void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_frames_to_render_
 	that means we can't just ask the capture stream to give us the number of samples we need: we 
 	have to handle buffering ourselves, this is what the deque is about.*/
 
-	// Overall mix = (mix_buffer + captured audio) / 2
-	// Always halve the mix buffer even if we can't get captured audio so whether we get captured audio doesn't change the perceived volume
+	// If the hardware +6 dB boost was successfully applied to the exclusive endpoint, we halve
+	// both signals before summing so the sum fits in s16 with no risk of overflow (the boost
+	// compensates perceptually). If the boost was not achievable we instead do a straight
+	// saturating add, accepting the rare risk of clipping over a guaranteed permanent volume drop.
 	u32 num_shorts_to_render_target = num_frames_to_render_target * 2; // Stereo samples
-	for (u32 i = 0; i < num_shorts_to_render_target; ++i)
-		mix_buffer[i] /= 2;
 
 	u32 shorts_mixed_this_cycle = 0;
+
+	auto mix_one_sample = [&](s16 &dest, s16 src)
+	{
+		if (m_volume_boost_applied)
+		{
+			// (A + B) / 2 in 32-bit: one divide on the sum preserves the bit that
+			// (A/2) + (B/2) would discard when both LSBs are 1.
+			int32_t sum = static_cast<int32_t>(dest) + static_cast<int32_t>(src);
+			dest = static_cast<s16>(sum / 2);
+		}
+		else
+		{
+			// Saturating add: clamp the result to the s16 range.
+			int32_t sum = static_cast<int32_t>(dest) + static_cast<int32_t>(src);
+			dest = static_cast<s16>(std::max(-32768, std::min(32767, sum)));
+		}
+	};
 
 	// Phase 1: Consume from our internal buffer first
 	while (shorts_mixed_this_cycle < num_shorts_to_render_target && !m_internal_capture_buffer.empty())
 	{
-		mix_buffer[shorts_mixed_this_cycle] += m_internal_capture_buffer.front() / 2;
+		mix_one_sample(mix_buffer[shorts_mixed_this_cycle], m_internal_capture_buffer.front());
 		m_internal_capture_buffer.pop_front();
 		shorts_mixed_this_cycle++;
 	}
@@ -1325,9 +1346,7 @@ void WASAPIStream::CaptureAudioAndMix(s16 *mix_buffer, u32 num_frames_to_render_
 			{
 				if (shorts_mixed_this_cycle < num_shorts_to_render_target)
 				{
-					// Add captured audio (also halved) to the already halved mix_buffer
-					//TODO Toggle for volume/2, or better
-					mix_buffer[shorts_mixed_this_cycle] += s16_capture_data[i] / 2;
+					mix_one_sample(mix_buffer[shorts_mixed_this_cycle], s16_capture_data[i]);
 					shorts_mixed_this_cycle++;
 				}
 				else
@@ -1360,18 +1379,16 @@ void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDevice
 {
 	HRESULT hr = S_OK;
 	IMMDeviceEnumerator *pEnumerator = NULL;
-	IMMDeviceCollection *pCollection = NULL;
-	IMMDevice *pCurrentDefaultConsoleDevice = NULL;
-	IMMDevice *pCurrentDefaultMultimediaDevice = NULL;
-	LPWSTR pwszDefaultConsoleId = NULL;
-	LPWSTR pwszDefaultMultimediaId = NULL;
 
 	hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
-	                      (void **)&pEnumerator);
+						  (void **)&pEnumerator);
 
-	if (FAILED(hr)) //TODO Logs
+	if (FAILED(hr))
 		return;
 
+	// Store the current default console endpoint ID so we can switch back on Stop().
+	IMMDevice *pCurrentDefaultConsoleDevice = NULL;
+	LPWSTR pwszDefaultConsoleId = NULL;
 	if (SUCCEEDED(pEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &pCurrentDefaultConsoleDevice)))
 	{
 		pCurrentDefaultConsoleDevice->GetId(&pwszDefaultConsoleId);
@@ -1379,7 +1396,6 @@ void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDevice
 		{
 			m_default_audio_device_id_prior_to_switch = std::wstring(pwszDefaultConsoleId);
 			m_pending_audio_device_switch_back = true;
-
 			CoTaskMemFree(pwszDefaultConsoleId);
 			pwszDefaultConsoleId = nullptr;
 		}
@@ -1391,25 +1407,101 @@ void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDevice
 		return;
 	}
 
+	// Determine if the communications endpoint currently equals the console default.
+	// If not, we leave it alone so unrelated communication apps are not disrupted.
+	bool switch_comms = false;
+	IMMDevice *pCurrentDefaultCommsDevice = NULL;
+	LPWSTR pwszDefaultCommsId = NULL;
+	if (SUCCEEDED(pEnumerator->GetDefaultAudioEndpoint(eRender, eCommunications, &pCurrentDefaultCommsDevice)))
+	{
+		pCurrentDefaultCommsDevice->GetId(&pwszDefaultCommsId);
+		if (pwszDefaultCommsId)
+		{
+			switch_comms = (std::wstring(pwszDefaultCommsId) == m_default_audio_device_id_prior_to_switch);
+			CoTaskMemFree(pwszDefaultCommsId);
+		}
+		SAFE_RELEASE(pCurrentDefaultCommsDevice);
+	}
+
+	// Find the sacrificial endpoint and set its volume to 100% so the loopback capture gets
+	// a full-scale signal. Store the original volume for restore on Stop().
+	m_should_restore_sacrificial_volume = false;
 	std::vector<AudioDevice> audioDevices = GetAudioDevices(eRender);
-	auto findResult = std::find_if(audioDevices.begin(), audioDevices.end(), [](const AudioDevice &device)
-	          { return device.friendlyName == SConfig::GetInstance().sAudioOutputDeviceToSwitchTo; });
+	auto findResult = std::find_if(audioDevices.begin(), audioDevices.end(), [&device_name](const AudioDevice &device)
+								   { return device.friendlyName == device_name; });
 	if (findResult != audioDevices.end())
 	{
-		IPolicyConfig *pPolicyConfig = NULL;
-		HRESULT hr = CoCreateInstance(_uuidof(CPolicyConfigClient), NULL, CLSCTX_INPROC_SERVER, _uuidof(IPolicyConfig),
-		                              (LPVOID *)&pPolicyConfig);
-		if (FAILED(hr))
+		// Open the sacrificial device and set its endpoint volume to max (0 dB / 100%).
+		IMMDeviceEnumerator *pEnum2 = NULL;
+		IMMDevice *pSacrificialDevice = NULL;
+		CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void **)&pEnum2);
+		if (pEnum2)
 		{
-			ERROR_LOG(AUDIO, "Failed to switch default audio output device: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-			return;
+			IMMDeviceCollection *pAll = NULL;
+			pEnum2->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pAll);
+			if (pAll)
+			{
+				UINT count = 0;
+				pAll->GetCount(&count);
+				for (UINT i = 0; i < count; ++i)
+				{
+					IMMDevice *pDev = NULL;
+					pAll->Item(i, &pDev);
+					LPWSTR pId = NULL;
+					pDev->GetId(&pId);
+					if (pId && std::wstring(pId) == findResult->id)
+					{
+						pSacrificialDevice = pDev;
+						CoTaskMemFree(pId);
+						break;
+					}
+					CoTaskMemFree(pId);
+					SAFE_RELEASE(pDev);
+				}
+				SAFE_RELEASE(pAll);
+			}
+			SAFE_RELEASE(pEnum2);
 		}
 
-		hr = pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eConsole);
-		hr = pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eMultimedia);
-		hr = pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eCommunications);
+		if (pSacrificialDevice)
+		{
+			IAudioEndpointVolume *pSacrifVol = nullptr;
+			if (SUCCEEDED(pSacrificialDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, NULL,
+													   (void **)&pSacrifVol)) && pSacrifVol)
+			{
+				float minDB, maxDB, stepDB;
+				float currentDB;
+				if (SUCCEEDED(pSacrifVol->GetMasterVolumeLevel(&currentDB)) &&
+					SUCCEEDED(pSacrifVol->GetVolumeRange(&minDB, &maxDB, &stepDB)))
+				{
+					m_sacrificial_device_original_volume_db = currentDB;
+					m_should_restore_sacrificial_volume = true;
+					if (SUCCEEDED(pSacrifVol->SetMasterVolumeLevel(maxDB, nullptr)))
+						INFO_LOG(AUDIO, "Sacrificial endpoint volume set to %.2f dB (was %.2f dB)", maxDB, currentDB);
+					else
+						WARN_LOG(AUDIO, "Failed to set sacrificial endpoint volume to max.");
+				}
+				SAFE_RELEASE(pSacrifVol);
+			}
+			SAFE_RELEASE(pSacrificialDevice);
+		}
 
-		SAFE_RELEASE(pPolicyConfig);
+		// Switch the default endpoints to the sacrificial device.
+		IPolicyConfig *pPolicyConfig = NULL;
+		hr = CoCreateInstance(_uuidof(CPolicyConfigClient), NULL, CLSCTX_INPROC_SERVER, _uuidof(IPolicyConfig),
+							  (LPVOID *)&pPolicyConfig);
+		if (SUCCEEDED(hr) && pPolicyConfig)
+		{
+			pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eConsole);
+			pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eMultimedia);
+			if (switch_comms)
+				pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eCommunications);
+			SAFE_RELEASE(pPolicyConfig);
+		}
+		else
+		{
+			ERROR_LOG(AUDIO, "Failed to switch default audio output device: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+		}
 	}
 
 	SAFE_RELEASE(pEnumerator);
@@ -1418,19 +1510,50 @@ void WASAPIStream::RestoreDefaultAudioOutputDevice()
 {
 	if (m_pending_audio_device_switch_back)
 	{
+		// Restore the sacrificial endpoint's volume before switching back, so it returns to
+		// its original level as soon as other apps resume playing through it.
+		if (m_should_restore_sacrificial_volume)
+		{
+			std::vector<AudioDevice> audioDevices = GetAudioDevices(eRender);
+			// The sacrificial device is the one currently set as the system default.
+			IMMDeviceEnumerator *pEnum = NULL;
+			IMMDevice *pSacrificialDevice = NULL;
+			CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void **)&pEnum);
+			if (pEnum)
+			{
+				pEnum->GetDefaultAudioEndpoint(eRender, eConsole, &pSacrificialDevice);
+				SAFE_RELEASE(pEnum);
+			}
+			if (pSacrificialDevice)
+			{
+				IAudioEndpointVolume *pSacrifVol = nullptr;
+				if (SUCCEEDED(pSacrificialDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, NULL,
+														   (void **)&pSacrifVol)) && pSacrifVol)
+				{
+					if (SUCCEEDED(pSacrifVol->SetMasterVolumeLevel(m_sacrificial_device_original_volume_db, nullptr)))
+						INFO_LOG(AUDIO, "Sacrificial endpoint volume restored to %.2f dB", m_sacrificial_device_original_volume_db);
+					else
+						WARN_LOG(AUDIO, "Failed to restore sacrificial endpoint volume.");
+					SAFE_RELEASE(pSacrifVol);
+				}
+				SAFE_RELEASE(pSacrificialDevice);
+			}
+			m_should_restore_sacrificial_volume = false;
+		}
+
 		IPolicyConfig *pPolicyConfig = NULL;
 		HRESULT hr = CoCreateInstance(_uuidof(CPolicyConfigClient), NULL, CLSCTX_INPROC_SERVER, _uuidof(IPolicyConfig),
-		                              (LPVOID *)&pPolicyConfig);
+									  (LPVOID *)&pPolicyConfig);
 		if (FAILED(hr))
 		{
 			ERROR_LOG(AUDIO, "Failed to switch default audio output device: HRESULT %s",
-			          wasapi_hresult_to_string(hr).c_str());
+					  wasapi_hresult_to_string(hr).c_str());
 			return;
 		}
 
-		hr = pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eConsole);
-		hr = pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eMultimedia);
-		hr = pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eCommunications);
+		pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eConsole);
+		pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eMultimedia);
+		pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eCommunications);
 
 		m_pending_audio_device_switch_back = false;
 
@@ -1438,24 +1561,27 @@ void WASAPIStream::RestoreDefaultAudioOutputDevice()
 	}
 }
 
-void WASAPIStream::AlterVolumeOfAudioDevice(float db_change, bool store_original_and_set_flag)
+// Attempts to apply db_change to the master volume of m_mm_device.
+// Returns true if the full requested change was applied (i.e. the target was within range),
+// false if the device was already at its limit and the change could not be fully applied.
+bool WASAPIStream::AlterVolumeOfAudioDevice(float db_change, bool store_original_and_set_flag)
 {
 	if (!m_mm_device)
 	{
 		WARN_LOG(AUDIO, "AlterVolumeOfAudioDevice: m_mm_device not set.");
-		return;
+		return false;
 	}
 
 	IAudioEndpointVolume *pEndpointVolume = nullptr;
 	HRESULT hr =
-	    m_mm_device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, NULL, (void **)&pEndpointVolume);
+		m_mm_device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, NULL, (void **)&pEndpointVolume);
 
 	if (FAILED(hr) || !pEndpointVolume)
 	{
 		ERROR_LOG(AUDIO, "Could not activate IAudioEndpointVolume. Volume won't be adjusted. HRESULT: %s",
-		          wasapi_hresult_to_string(hr).c_str());
+				  wasapi_hresult_to_string(hr).c_str());
 		SAFE_RELEASE(pEndpointVolume);
-		return;
+		return false;
 	}
 
 	float currentVolumeDB, minDB, maxDB, stepDB;
@@ -1464,18 +1590,18 @@ void WASAPIStream::AlterVolumeOfAudioDevice(float db_change, bool store_original
 	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "Could not get current master volume level (dB). Volume won't be adjusted. HRESULT: %s",
-		          wasapi_hresult_to_string(hr).c_str());
+				  wasapi_hresult_to_string(hr).c_str());
 		SAFE_RELEASE(pEndpointVolume);
-		return;
+		return false;
 	}
 
 	hr = pEndpointVolume->GetVolumeRange(&minDB, &maxDB, &stepDB);
 	if (FAILED(hr))
 	{
 		ERROR_LOG(AUDIO, "Could not get device volume range (dB). Volume won't be adjusted. HRESULT: %s",
-		          wasapi_hresult_to_string(hr).c_str());
+				  wasapi_hresult_to_string(hr).c_str());
 		SAFE_RELEASE(pEndpointVolume);
-		return;
+		return false;
 	}
 
 	INFO_LOG(AUDIO, "Device volume range: min=%.2fdB, max=%.2fdB, step=%.2fdB", minDB, maxDB, stepDB);
@@ -1487,47 +1613,42 @@ void WASAPIStream::AlterVolumeOfAudioDevice(float db_change, bool store_original
 	}
 
 	float targetVolumeDB = currentVolumeDB + db_change;
+	bool full_change_achievable = (targetVolumeDB <= maxDB);
 
 	targetVolumeDB = std::max(minDB, std::min(targetVolumeDB, maxDB));
 
-	if (stepDB > 0.0f) {
-	    targetVolumeDB = std::round(targetVolumeDB / stepDB) * stepDB;
-	}
+	if (stepDB > 0.0f)
+		targetVolumeDB = std::round(targetVolumeDB / stepDB) * stepDB;
 
-	if (std::abs(targetVolumeDB - currentVolumeDB) > (stepDB / 2.0f)) // Don't bother with very small changes
+	if (std::abs(targetVolumeDB - currentVolumeDB) > (stepDB / 2.0f))
 	{
 		hr = pEndpointVolume->SetMasterVolumeLevel(targetVolumeDB, nullptr);
 		if (SUCCEEDED(hr))
 		{
 			if (store_original_and_set_flag)
-			{
-				INFO_LOG(AUDIO,
-				         "Device volume compensation: old=%.2fdB, new=%.2fdB", m_original_volume_db, targetVolumeDB);
-			}
+				INFO_LOG(AUDIO, "Device volume compensation: old=%.2fdB, new=%.2fdB", m_original_volume_db, targetVolumeDB);
 			else
-			{
 				INFO_LOG(AUDIO, "Device volume restored to: %.2fdB", targetVolumeDB);
-			}
 		}
 		else
 		{
 			WARN_LOG(AUDIO, "Failed to set device volume to %.2fdB. HRESULT: %s", targetVolumeDB,
-			         wasapi_hresult_to_string(hr).c_str());
+					 wasapi_hresult_to_string(hr).c_str());
 			SAFE_RELEASE(pEndpointVolume);
-			return;
+			return false;
 		}
 	}
 	else
 	{
-		INFO_LOG(AUDIO, "Device volume already at target or very close (Current: %.2fdB, Target: %.2fdB), no change made.", currentVolumeDB, targetVolumeDB);
+		INFO_LOG(AUDIO, "Device volume already at target or very close (Current: %.2fdB, Target: %.2fdB), no change made.",
+				 currentVolumeDB, targetVolumeDB);
 	}
 
 	if (store_original_and_set_flag)
-	{
 		m_should_switch_volume_back = true;
-	}
 
 	SAFE_RELEASE(pEndpointVolume);
+	return full_change_achievable;
 }
 
 void WASAPIStream::RestoreVolumeIfNeeded()
