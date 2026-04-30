@@ -9,6 +9,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LocalDebuggerCommandArguments>-d</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArgumentsHistory>-d|</LocalDebuggerCommandArgumentsHistory>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleasePlayback|x64'">
     <LocalDebuggerCommandArguments>-d</LocalDebuggerCommandArguments>
