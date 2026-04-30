@@ -1158,6 +1158,8 @@ void WASAPIStream::SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDevice
 		}
 
 		hr = pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eConsole);
+		hr = pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eMultimedia);
+		hr = pPolicyConfig->SetDefaultEndpoint(findResult->id.c_str(), eCommunications);
 
 		SAFE_RELEASE(pPolicyConfig);
 	}
@@ -1179,6 +1181,9 @@ void WASAPIStream::RestoreDefaultAudioOutputDevice()
 		}
 
 		hr = pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eConsole);
+		hr = pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eMultimedia);
+		hr = pPolicyConfig->SetDefaultEndpoint(m_default_audio_device_id_prior_to_switch.c_str(), eCommunications);
+
 		m_pending_audio_device_switch_back = false;
 
 		SAFE_RELEASE(pPolicyConfig);
