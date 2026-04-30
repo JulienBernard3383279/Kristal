@@ -218,6 +218,22 @@ void CMixer::PushSamples(const s16 *samples, u32 num_samples)
 {
 	//static int counter = 0;
 
+	// If a direct sink is registered (e.g. timer-driven exclusive WASAPI), forward the samples
+	// straight to it and bypass the FIFO entirely. The sink is responsible for resampling,
+	// buffering and writing to the audio device.
+	{
+		std::lock_guard<std::mutex> lk(m_direct_sink_mutex);
+		if (m_direct_sink)
+		{
+			m_direct_sink(samples, num_samples, m_dma_mixer.GetInputSampleRate());
+
+			int sample_rate = m_dma_mixer.GetInputSampleRate();
+			if (m_log_dsp_audio)
+				g_wave_writer_dsp.AddStereoSamplesBE(samples, num_samples, sample_rate);
+			return;
+		}
+	}
+
 	m_dma_mixer.PushSamples(samples, num_samples);
 	//if (counter == 1000)
 	//{
@@ -228,6 +244,18 @@ void CMixer::PushSamples(const s16 *samples, u32 num_samples)
 	int sample_rate = m_dma_mixer.GetInputSampleRate();
 	if (m_log_dsp_audio)
 		g_wave_writer_dsp.AddStereoSamplesBE(samples, num_samples, sample_rate);
+}
+
+void CMixer::SetDirectSink(DirectSink sink)
+{
+	std::lock_guard<std::mutex> lk(m_direct_sink_mutex);
+	m_direct_sink = std::move(sink);
+}
+
+void CMixer::ClearDirectSink()
+{
+	std::lock_guard<std::mutex> lk(m_direct_sink_mutex);
+	m_direct_sink = nullptr;
 }
 
 void CMixer::PushStreamingSamples(const s16 *samples, u32 num_samples)

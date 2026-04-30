@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstring>
 #include <array>
+#include <functional>
 #include <mutex>
 #include <vector>
 
@@ -42,6 +43,13 @@ public:
 	virtual void PushSamples(const s16* samples, u32 num_samples);
 	virtual void PushStreamingSamples(const s16* samples, u32 num_samples);
 	virtual void PushWiimoteSpeakerSamples(const s16* samples, u32 num_samples, u32 sample_rate);
+
+	// Direct sink for the DMA push path. When set, PushSamples bypasses the FIFO and forwards
+	// samples (still big-endian, 16-bit stereo) directly to the sink along with the current
+	// input sample rate. Used by the timer-driven exclusive WASAPI backend.
+	using DirectSink = std::function<void(const s16* samples, u32 num_samples, u32 input_sample_rate)>;
+	void SetDirectSink(DirectSink sink);
+	void ClearDirectSink();
 	// Called from exclusive WASAPI audio backend only
 	//virtual void PushAudioInSamples(const s16 *samples, u32 num_samples);
 	//TODO Perhaps audio in should have its own volume
@@ -165,6 +173,11 @@ protected:
 	std::mutex m_cs_mixing;
 
 	std::atomic<float> m_speed; // Current rate of the emulation (1.0 = 100% speed)
+
+	// Direct sink and its mutex (see SetDirectSink). Mutex is held while invoking the sink so
+	// that ClearDirectSink during shutdown synchronizes with in-flight pushes.
+	DirectSink m_direct_sink;
+	std::mutex m_direct_sink_mutex;
 
 private:
 

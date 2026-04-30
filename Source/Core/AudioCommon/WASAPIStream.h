@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <deque>
+#include <mutex>
 
 #ifdef _WIN32
 #include <audioclient.h>
@@ -75,6 +76,35 @@ public:
 	float m_original_volume_db = 0.0f;
 	void AlterVolumeOfAudioDevice(float db_change, bool store_original_and_set_flag);
 	void RestoreVolumeIfNeeded();
+
+	// --- Timer-driven exclusive direct-push path ---
+
+	// Called from the DMA thread via CMixer::PushSamples. Resamples the incoming game audio
+	// from input_sample_rate to 48 kHz, applies margin-based drop/duplicate correction, mixes
+	// in any captured audio, applies volume, and writes directly to the WASAPI render buffer.
+	void FeedSamplesDirect(const s16 *samples, u32 num_samples, u32 input_sample_rate);
+
+	// Margin (target padding) in render frames. Recomputed at Start() from SConfig::iMargin.
+	u32 m_margin_frames = 0;
+
+	// Linear resampler state for the direct path. Persisted across PushSamples calls so the
+	// resampler picks up where the previous block left off without discontinuities.
+	float m_resample_phase = 0.0f;     // current fractional position into the input stream
+	s16 m_resample_last_l = 0;         // last input-domain sample for interpolation
+	s16 m_resample_last_r = 0;
+	u32 m_resample_last_input_rate = 0;
+
+	// Rolling window of the smallest pre-write padding (in frames) seen across the last N
+	// pushes. Used to detect persistent over/under-fill of the WASAPI buffer relative to the
+	// margin and trigger a single drop/duplicate correction per push.
+	static constexpr u32 PADDING_HISTORY_SIZE = 20;
+	std::deque<u32> m_padding_history;
+
+	// Set to false at Start(); the first FeedSamplesDirect call primes the buffer with 10 ms
+	// of silence before writing real audio, then flips this to true.
+	bool m_direct_path_primed = false;
+
+	std::mutex m_direct_path_mutex; // guards FeedSamplesDirect against Stop()
 
 #else
 public:

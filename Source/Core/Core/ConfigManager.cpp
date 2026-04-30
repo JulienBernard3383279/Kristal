@@ -277,7 +277,7 @@ void SConfig::SaveCoreSettings(IniFile &ini)
 	core->Set("DPL2Decoder", bDPL2Decoder);
 	core->Set("TimeStretching", bTimeStretching);
 	core->Set("RSHACK", bRSHACK);
-	core->Set("Latency", iLatency);
+	core->Set("Margin", iMargin);
 	core->Set("ReduceTimingDispersion", bReduceTimingDispersion);
 	core->Set("SlippiJukeboxEnabled", bSlippiJukeboxEnabled);
 	core->Set("SlippiJukeboxVolume", iSlippiJukeboxVolume);
@@ -630,7 +630,7 @@ void SConfig::LoadCoreSettings(IniFile &ini)
 	core->Get("DPL2Decoder", &bDPL2Decoder, false);
 	core->Get("TimeStretching", &bTimeStretching, false);
 	core->Get("RSHACK", &bRSHACK, false);
-	core->Get("Latency", &iLatency, 0);
+	core->Get("Margin", &iMargin, 5);
 	core->Get("ReduceTimingDispersion", &bReduceTimingDispersion, false);
 	core->Get("SlippiJukeboxEnabled", &bSlippiJukeboxEnabled, true);
 	core->Get("SlippiJukeboxVolume", &iSlippiJukeboxVolume, 100);
@@ -871,7 +871,7 @@ void SConfig::LoadDefaults()
 	bDPL2Decoder = false;
 	bTimeStretching = false;
 	bRSHACK = false;
-	iLatency = 14;
+	iMargin = 5;
 
 	iPosX = INT_MIN;
 	iPosY = INT_MIN;

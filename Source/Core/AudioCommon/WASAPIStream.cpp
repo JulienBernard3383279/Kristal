@@ -3,8 +3,10 @@
 // Refer to the license.txt file included.
 
 #include "AudioCommon/WASAPIStream.h"
+#include "AudioCommon/AudioCommon.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
+#include "Common/CommonFuncs.h"
 #include "VideoCommon/OnScreenDisplay.h"
 
 #include <avrt.h>
@@ -270,7 +272,9 @@ bool WASAPIStream::Start()
 		return false;
 	}
 
-	DWORD exclusiveStreamFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST;
+	// Timer-driven exclusive: no event callback, the DMA push thread fills the WASAPI buffer
+	// directly via FeedSamplesDirect. Shared mode keeps the legacy event-driven flow.
+	DWORD exclusiveStreamFlags = AUDCLNT_STREAMFLAGS_NOPERSIST;
 	DWORD sharedStreamFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
 	auto format_ptr = reinterpret_cast<WAVEFORMATEX *>(&fmt);
 
@@ -285,15 +289,19 @@ bool WASAPIStream::Start()
 			SwitchDefaultAudioOutputDeviceByDeviceNameAndStorePriorDeviceId(SConfig::GetInstance().sAudioOutputDeviceToSwitchTo, true);
 		}
 
-		exclusive_device_period += SConfig::GetInstance().iLatency * 10000;
+		// Fixed 2048-frame buffer at 48 kHz (~42.67 ms). The actual buffered audio level is
+		// regulated by the margin (drop/duplicate logic in FeedSamplesDirect), not by this size.
+		constexpr u32 TARGET_FRAMES = 2048;
+		exclusive_device_period =
+			static_cast<REFERENCE_TIME>(10000.0 * 1000 * TARGET_FRAMES / fmt.Format.nSamplesPerSec + 0.5);
 
 		hr = m_audio_client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, exclusiveStreamFlags, exclusive_device_period,
-		                                exclusive_device_period, format_ptr, nullptr);
+										exclusive_device_period, format_ptr, nullptr);
 
 		if (hr == AUDCLNT_E_UNSUPPORTED_FORMAT)
 			OSD::AddMessage("Your current audio device doesn't support 16-bit 48000 hz PCM audio. WASAPI exclusive "
-			                "mode won't work.",
-			                6000U);
+							"mode won't work.",
+							6000U);
 
 		if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED)
 		{
@@ -313,8 +321,7 @@ bool WASAPIStream::Start()
 			}
 
 			exclusive_device_period =
-			    static_cast<REFERENCE_TIME>(10000.0 * 1000 * temp_frames_in_buffer / fmt.Format.nSamplesPerSec + 0.5) +
-			    SConfig::GetInstance().iLatency * 10000;
+				static_cast<REFERENCE_TIME>(10000.0 * 1000 * temp_frames_in_buffer / fmt.Format.nSamplesPerSec + 0.5);
 
 			// Need to re-activate to get a new IAudioClient instance
 			hr = m_mm_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void **)&m_audio_client);
@@ -328,7 +335,7 @@ bool WASAPIStream::Start()
 			}
 
 			hr = m_audio_client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, exclusiveStreamFlags, exclusive_device_period,
-			                                exclusive_device_period, format_ptr, nullptr);
+											exclusive_device_period, format_ptr, nullptr);
 		}
 
 		if (SUCCEEDED(hr) && m_audioCaptureType != AudioCaptureType::None)
@@ -435,23 +442,28 @@ bool WASAPIStream::Start()
 		OSD::AddMessage("Effective audio buffer size: " + std::to_string(bufferInMs) + " ms", 10000U);
 	}
 
-	m_need_data_event = CreateEvent(NULL, FALSE, FALSE, NULL);
-	if (m_need_data_event == NULL)
+	// In exclusive timer-driven mode there is no event handle: the DMA push thread feeds the
+	// WASAPI buffer directly via FeedSamplesDirect. Only shared mode still uses the event.
+	if (!m_exclusive_mode)
 	{
-		ERROR_LOG(AUDIO, "WASAPIStream: Failed to create event handle.");
-		cleanUpAudioClients();
-		return false;
-	}
+		m_need_data_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+		if (m_need_data_event == NULL)
+		{
+			ERROR_LOG(AUDIO, "WASAPIStream: Failed to create event handle.");
+			cleanUpAudioClients();
+			return false;
+		}
 
-	hr = m_audio_client->SetEventHandle(m_need_data_event);
-	if (FAILED(hr)) // Should not fail if handle is valid
-	{
-		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-		ERROR_LOG(AUDIO, "WASAPIStream: Failed to set event handle.");
-		CloseHandle(m_need_data_event);
-		m_need_data_event = nullptr;
-		cleanUpAudioClients();
-		return false;
+		hr = m_audio_client->SetEventHandle(m_need_data_event);
+		if (FAILED(hr)) // Should not fail if handle is valid
+		{
+			ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
+			ERROR_LOG(AUDIO, "WASAPIStream: Failed to set event handle.");
+			CloseHandle(m_need_data_event);
+			m_need_data_event = nullptr;
+			cleanUpAudioClients();
+			return false;
+		}
 	}
 
 	hr = m_audio_client->GetService(__uuidof(IAudioRenderClient), (void **)&m_renderer);
@@ -460,10 +472,26 @@ bool WASAPIStream::Start()
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		ERROR_LOG(AUDIO, "WASAPIStream: Couldn't get IAudioClient renderer.");
-		CloseHandle(m_need_data_event);
-		m_need_data_event = nullptr;
+		if (m_need_data_event)
+		{
+			CloseHandle(m_need_data_event);
+			m_need_data_event = nullptr;
+		}
 		cleanUpAudioClients();
 		return false;
+	}
+
+	// Prime the buffer with one full period of silence so playback can start cleanly. In
+	// timer-driven exclusive mode this also seeds the buffered audio level near full, from
+	// which the margin regulation will quickly drift it back toward m_margin_frames.
+	if (m_exclusive_mode)
+	{
+		BYTE *prime_data = nullptr;
+		HRESULT prime_hr = m_renderer->GetBuffer(frames_in_buffer, &prime_data);
+		if (SUCCEEDED(prime_hr) && prime_data != nullptr)
+		{
+			m_renderer->ReleaseBuffer(frames_in_buffer, AUDCLNT_BUFFERFLAGS_SILENT);
+		}
 	}
 
 	hr = m_audio_client->Start();
@@ -471,11 +499,38 @@ bool WASAPIStream::Start()
 	{
 		ERROR_LOG(AUDIO, "WASAPIStream: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
 		ERROR_LOG(AUDIO, "WASAPIStream: Couldn't start audio client.");
-		CloseHandle(m_need_data_event);
-		m_need_data_event = nullptr;
+		if (m_need_data_event)
+		{
+			CloseHandle(m_need_data_event);
+			m_need_data_event = nullptr;
+		}
 		SAFE_RELEASE(m_renderer);
 		cleanUpAudioClients();
 		return false;
+	}
+
+	if (m_exclusive_mode)
+	{
+		// Compute margin in 48 kHz frames (clamped to [1ms, half the buffer]).
+		int margin_ms = std::max(1, SConfig::GetInstance().iMargin);
+		m_margin_frames = static_cast<u32>(margin_ms) * (fmt.Format.nSamplesPerSec / 1000);
+		if (m_margin_frames > frames_in_buffer / 2)
+			m_margin_frames = frames_in_buffer / 2;
+
+		// Reset resampler / padding-history state for a fresh stream.
+		m_resample_phase = 0.0f;
+		m_resample_last_l = 0;
+		m_resample_last_r = 0;
+		m_resample_last_input_rate = 0;
+		m_padding_history.clear();
+		m_direct_path_primed = false;
+
+		// Disable the base SoundLoop thread; the DMA push path drives playback directly.
+		m_enablesoundloop = false;
+
+		// Register the direct sink on the mixer so PushSamples lands in FeedSamplesDirect.
+		m_mixer->SetDirectSink([this](const s16 *samples, u32 num_samples, u32 input_sample_rate)
+							   { FeedSamplesDirect(samples, num_samples, input_sample_rate); });
 	}
 
 	SoundStream::Start();
@@ -505,100 +560,9 @@ void WASAPIStream::SoundLoop()
 
 		if (m_exclusive_mode)
 		{
-			// In event driven exclusive mode, GetCurrentPadding doesn't work and musn't be used; we're always given a buffer to fill completely.
-
-			u8 *data = nullptr;
-			HRESULT hr;
-
-			// Initial silent buffer prime
-			hr = m_renderer->GetBuffer(frames_in_buffer, &data);
-			if (SUCCEEDED(hr) && data != nullptr)
-			{
-				m_renderer->ReleaseBuffer(frames_in_buffer, AUDCLNT_BUFFERFLAGS_SILENT);
-			}
-			else
-			{
-				ERROR_LOG(AUDIO, "Exclusive mode: Initial GetBuffer for priming failed: HRESULT %s",
-				          wasapi_hresult_to_string(hr).c_str());
-				if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
-					threadData = false; // Signal thread to stop
-			}
-
-			while (threadData.load())
-			{
-				WaitForSingleObject(m_need_data_event, 1000);
-				if (!threadData.load())
-					return;
-
-				hr = m_renderer->GetBuffer(frames_in_buffer, &data);
-				if (FAILED(hr))
-				{
-					ERROR_LOG(AUDIO, "Exclusive GetBuffer failed: HRESULT %s", wasapi_hresult_to_string(hr).c_str());
-					if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
-					{
-						ERROR_LOG(AUDIO, "Audio device invalidated during exclusive GetBuffer. Stopping stream.");
-						threadData = false;
-					}
-					break;
-				}
-				if (data == nullptr)
-				{ // Should not happen if SUCCEEDED(hr)
-					ERROR_LOG(AUDIO, "Exclusive GetBuffer returned S_OK but data is nullptr. Stopping stream.");
-					threadData = false;
-					break;
-				}
-
-				m_mixer->Mix(reinterpret_cast<s16 *>(data), frames_in_buffer);
-				{
-					static int hadNonZeroSamplesBeforeCountdown = 0;
-					bool foundNonZeroSamples = false;
-					const int minSound = 50;
-					for (u32 i = 0; i < frames_in_buffer * 2; ++i)
-					{
-						if (abs(reinterpret_cast<s16 *>(data)[i]) > minSound)
-						{
-							foundNonZeroSamples = true;
-							break;
-						}
-					}
-					if (foundNonZeroSamples && hadNonZeroSamplesBeforeCountdown == 0)
-					{
-						auto now = std::chrono::system_clock::now();
-						auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-						//ERROR_LOG(AUDIO, "%lld - WASAPI NonZeroSamplesFedToWASAPI", us);
-					}
-					hadNonZeroSamplesBeforeCountdown = foundNonZeroSamples ? 4
-					                                   : (hadNonZeroSamplesBeforeCountdown == 0)
-					                                       ? 0 : (hadNonZeroSamplesBeforeCountdown - 1);
-				}
-
-				// Ideally we should not make a smaller signal by applying the volume here, in exclusive mode.
-				// We should be sending to the device the volume we want, provided it supports volume adjustment, and send a full range signal.
-				// The audio level set in windows does that, but any volume adjustment done by apps e.g. here or by chrome, will lower the signal.
-				// This matters for audio quality, for example if the device has a programmable gain amplifier and it's going to take our
-				// signal, pass it to an ADC and then amplify it. It's better noise-wise to low amplify a full range signal than 
-				// high amplify a low range signal, and any noise that exists at this stage.
-				// Since we're in exclusive mode we know we're the only stream so we could adjust the volume based on the volume set 
-				// within dolphin, on top of the windows one, and undo on exit, which would be ideal.
-
-				float volume = SConfig::GetInstance().m_IsMuted ? 0 : SConfig::GetInstance().m_Volume / 100.0f;
-				s16 *s16_data = reinterpret_cast<s16 *>(data);
-				for (u32 i = 0; i < frames_in_buffer * 2; i++) // Stereo
-					s16_data[i] = static_cast<s16>(s16_data[i] * volume);
-
-				// Note that Dolphin audio volume doesn't impact pass-through audio.
-				// Pass-through audio volume is controlled by the Windows mixer directly
-				// However it does halve it, which is somewhat questionable for fluidity. Perhaps when we add a
-				// feature to auto-switch from normal output to the pass-through endpoint on 
-				// Dolphin start-up, we should also set that endpoint's volume to normal output + 6dB
-				if (m_audioCaptureType != AudioCaptureType::None)
-				{
-					CaptureAudioAndMix(reinterpret_cast<s16 *>(data), frames_in_buffer);
-				}
-
-				m_renderer->ReleaseBuffer(frames_in_buffer,
-				                          Core::GetState() != Core::CORE_RUN ? AUDCLNT_BUFFERFLAGS_SILENT : 0);
-			}
+			// Unreachable: in timer-driven exclusive mode m_enablesoundloop is set to false in
+			// Start(), so the base SoundStream never spawns this thread. The DMA push path
+			// (FeedSamplesDirect) is what feeds the WASAPI buffer instead.
 		}
 		else // Shared mode
 		{
@@ -697,6 +661,195 @@ void WASAPIStream::SoundLoop()
 	}
 }
 
+// Direct push from the DMA thread (timer-driven exclusive WASAPI). Samples arrive in big-endian
+// 16-bit stereo at input_sample_rate; we resample to 48 kHz, regulate the buffered audio level
+// against m_margin_frames using a rolling 20-block minimum of pre-write padding, optionally
+// mix in captured audio, apply volume and write to the WASAPI render buffer.
+void WASAPIStream::FeedSamplesDirect(const s16 *samples, u32 num_samples, u32 input_sample_rate)
+{
+	std::lock_guard<std::mutex> lk(m_direct_path_mutex);
+
+	if (!m_audio_client || !m_renderer || num_samples == 0 || input_sample_rate == 0)
+		return;
+
+	// On the very first push after stream start, write 10 ms of silence so the device has a
+	// comfortable cushion before real audio arrives and avoids an underrun-induced stutter.
+	if (!m_direct_path_primed)
+	{
+		m_direct_path_primed = true;
+		constexpr u32 PRIME_FRAMES = 48000 / 100; // 10 ms @ 48 kHz = 480 frames
+		u32 frames_to_prime = std::min(PRIME_FRAMES, frames_in_buffer);
+		BYTE *prime_data = nullptr;
+		if (SUCCEEDED(m_renderer->GetBuffer(frames_to_prime, &prime_data)) && prime_data != nullptr)
+			m_renderer->ReleaseBuffer(frames_to_prime, AUDCLNT_BUFFERFLAGS_SILENT);
+	}
+
+	// Reset interpolation state on input-rate changes (e.g. AIDFR toggle).
+	if (input_sample_rate != m_resample_last_input_rate)
+	{
+		m_resample_last_input_rate = input_sample_rate;
+		m_resample_phase = 0.0f;
+		m_resample_last_l = 0;
+		m_resample_last_r = 0;
+	}
+
+	const u32 output_rate = fmt.Format.nSamplesPerSec; // always 48000
+	const float ratio = static_cast<float>(input_sample_rate) / static_cast<float>(output_rate);
+
+	// Generate output frames from input frames via linear interpolation. m_resample_last_*
+	// holds input frame "n-1" carried over from the previous call; samples[] holds frames
+	// starting at "n". m_resample_phase is the current fractional position within frame n.
+	// For each output we read frame floor(idx) and frame floor(idx)+1, lerp by frac(idx).
+	// We advance idx by ratio per output frame; when floor(idx) reaches num_samples we stop.
+
+	// Pre-size scratch generously; we never produce more than ceil(num_samples/ratio)+2 frames,
+	// plus one extra slot in case the margin logic duplicates the trailing frame.
+	const u32 max_out_frames = static_cast<u32>(num_samples / ratio) + 4;
+	std::vector<s16> out_buf(max_out_frames * 2);
+
+	auto sample_at = [&](s32 input_idx, s16 *l, s16 *r)
+	{
+		if (input_idx < 0)
+		{
+			*l = m_resample_last_l;
+			*r = m_resample_last_r;
+		}
+		else
+		{
+			// Input is big-endian stereo with right at even index, left at odd (matches AX
+			// output convention used elsewhere in this codebase).
+			s16 right = static_cast<s16>(Common::swap16(samples[input_idx * 2]));
+			s16 left = static_cast<s16>(Common::swap16(samples[input_idx * 2 + 1]));
+			*l = left;
+			*r = right;
+		}
+	};
+
+	u32 out_count = 0;
+	float pos = m_resample_phase;
+	while (true)
+	{
+		s32 base = static_cast<s32>(std::floor(pos));
+		if (base >= static_cast<s32>(num_samples))
+			break;
+		float frac = pos - static_cast<float>(base);
+
+		// Interpolate between input frame (base-1) and input frame (base). When base==0 the
+		// "previous" frame is the carry-over from the previous push (m_resample_last_*).
+		s16 l0, r0, l1, r1;
+		sample_at(base - 1, &l0, &r0);
+		sample_at(base, &l1, &r1);
+
+		s16 left = static_cast<s16>((1.0f - frac) * l0 + frac * l1);
+		s16 right = static_cast<s16>((1.0f - frac) * r0 + frac * r1);
+
+		// Right at even index, left at odd — matches the downstream / capture-mix convention.
+		out_buf[out_count * 2 + 0] = right;
+		out_buf[out_count * 2 + 1] = left;
+		++out_count;
+		pos += ratio;
+	}
+
+	// Update carry-over state: m_resample_last_* becomes the last consumed input frame; the
+	// new phase is pos mapped into the next call's coordinate frame (subtract num_samples).
+	if (num_samples > 0)
+	{
+		s16 last_l, last_r;
+		sample_at(static_cast<s32>(num_samples) - 1, &last_l, &last_r);
+		m_resample_last_l = last_l;
+		m_resample_last_r = last_r;
+	}
+	m_resample_phase = pos - static_cast<float>(num_samples);
+	if (m_resample_phase < 0.0f)
+		m_resample_phase = 0.0f; // safety
+
+	if (out_count == 0)
+		return;
+
+	// --- Margin regulation: drop/duplicate one output frame per push ---
+	// Read pre-write padding and update rolling minimum window.
+	UINT32 padding = 0;
+	if (FAILED(m_audio_client->GetCurrentPadding(&padding)))
+		padding = 0;
+
+	m_padding_history.push_back(padding);
+	if (m_padding_history.size() > PADDING_HISTORY_SIZE)
+		m_padding_history.pop_front();
+
+	u32 min_padding = m_padding_history.front();
+	for (u32 p : m_padding_history)
+		if (p < min_padding)
+			min_padding = p;
+
+	// Publish the 20-block minimum for the on-screen audio margin display.
+	AudioCommon::g_audio_min_margin_ms.store(
+		static_cast<float>(min_padding) * 1000.0f / static_cast<float>(output_rate));
+
+	const u32 one_ms_frames = output_rate / 1000; // 48 frames
+
+	// Only correct once the history is full, otherwise we react to startup transients.
+	if (m_padding_history.size() == PADDING_HISTORY_SIZE && out_count >= 2)
+	{
+		if (min_padding > m_margin_frames + one_ms_frames)
+		{
+			// Persistently too full — drop one output frame from this block.
+			--out_count;
+			// Bias the history so we don't repeatedly correct on the same evidence.
+			for (u32 &p : m_padding_history)
+				p = (p > 0) ? p - 1 : 0;
+		}
+		else if (min_padding + one_ms_frames < m_margin_frames)
+		{
+			// Persistently too empty — duplicate one output frame at the end of this block.
+			out_buf[out_count * 2 + 0] = out_buf[(out_count - 1) * 2 + 0];
+			out_buf[out_count * 2 + 1] = out_buf[(out_count - 1) * 2 + 1];
+			++out_count;
+			for (u32 &p : m_padding_history)
+				p += 1;
+		}
+	}
+
+	// --- Write to WASAPI buffer in chunks bounded by available space ---
+	u32 written = 0;
+	while (written < out_count)
+	{
+		UINT32 cur_padding = 0;
+		if (FAILED(m_audio_client->GetCurrentPadding(&cur_padding)))
+			break;
+		u32 free_frames = (frames_in_buffer > cur_padding) ? (frames_in_buffer - cur_padding) : 0;
+		if (free_frames == 0)
+		{
+			// Buffer is full — drop the rest of this block to avoid blocking the DMA thread.
+			break;
+		}
+		u32 to_write = std::min(out_count - written, free_frames);
+
+		BYTE *data = nullptr;
+		HRESULT hr = m_renderer->GetBuffer(to_write, &data);
+		if (FAILED(hr) || data == nullptr)
+		{
+			if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+				ERROR_LOG(AUDIO, "FeedSamplesDirect: device invalidated");
+			break;
+		}
+
+		std::memcpy(data, &out_buf[written * 2], to_write * 2 * sizeof(s16));
+
+		// Apply volume and mix in captured audio in-place on the freshly-written region.
+		s16 *s16_data = reinterpret_cast<s16 *>(data);
+		if (m_audioCaptureType != AudioCaptureType::None)
+			CaptureAudioAndMix(s16_data, to_write);
+
+		float volume = SConfig::GetInstance().m_IsMuted ? 0.0f : SConfig::GetInstance().m_Volume / 100.0f;
+		for (u32 i = 0; i < to_write * 2; ++i)
+			s16_data[i] = static_cast<s16>(s16_data[i] * volume);
+
+		DWORD flags = (Core::GetState() != Core::CORE_RUN) ? AUDCLNT_BUFFERFLAGS_SILENT : 0;
+		m_renderer->ReleaseBuffer(to_write, flags);
+		written += to_write;
+	}
+}
+
 
 // Poll until the given endpoint can be opened in shared mode, or timeout.
 // Probes by activating an IAudioClient and calling GetMixFormat: this exercises
@@ -764,6 +917,21 @@ static bool WaitUntilEndpointReady(LPCWSTR endpointId, DWORD timeoutMs = 2000, D
 
 void WASAPIStream::Stop()
 {
+	// Unregister the direct sink first so no new PushSamples calls land in FeedSamplesDirect.
+	// The mixer's own mutex pairs with this so a push already in flight either fully completes
+	// before ClearDirectSink returns, or won't observe the sink at all.
+	if (m_mixer)
+		m_mixer->ClearDirectSink();
+
+	// Clear the OSD audio margin display.
+	AudioCommon::g_audio_min_margin_ms.store(-1.0f);
+
+	// Then take the direct-path mutex to ensure any still-in-flight FeedSamplesDirect call has
+	// finished before we tear down the audio client and renderer it accesses.
+	{
+		std::lock_guard<std::mutex> lk(m_direct_path_mutex);
+	}
+
 	SoundStream::Stop(); // This should signal threadData to false and join the SoundLoop thread
 
 	if (m_need_data_event)
@@ -782,12 +950,16 @@ void WASAPIStream::Stop()
 
 	// Release the exclusive stream and all audio resources BEFORE restoring the default
 	// endpoint, so that the endpoint is no longer held when other applications try to
-	// re-open their streams on it.
-	SAFE_RELEASE(m_renderer);
-	SAFE_RELEASE(m_capture_client);
-	SAFE_RELEASE(m_audio_client);
-	SAFE_RELEASE(m_capture_audio_client);
-	SAFE_RELEASE(m_mm_device);
+	// re-open their streams on it. Hold the direct-path mutex while releasing m_audio_client
+	// and m_renderer so that even if a push slipped through, it observes a coherent null state.
+	{
+		std::lock_guard<std::mutex> lk(m_direct_path_mutex);
+		SAFE_RELEASE(m_renderer);
+		SAFE_RELEASE(m_capture_client);
+		SAFE_RELEASE(m_audio_client);
+		SAFE_RELEASE(m_capture_audio_client);
+		SAFE_RELEASE(m_mm_device);
+	}
 
 	if (m_exclusive_mode && SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
 	{

@@ -45,6 +45,7 @@
 #include "Core/NetPlayProto.h"
 #include "Core/NetPlayClient.h"
 #include "Core/HW/SI.h"
+#include "AudioCommon/AudioCommon.h"
 
 #include "InputCommon/GCAdapter.h"
 
@@ -379,19 +380,34 @@ void Renderer::DrawDebugText()
 		final_yellow += "\n";
 	}
 
-    if(g_ActiveConfig.bShowOSDClock)
-    {
-        std::stringstream ss;
-        
-        // makes std::put_time use AM/PM depending on the system locale
-        ss.imbue(std::locale(""));
-        
-        std::time_t time = std::time(nullptr);
-        ss << std::put_time(std::localtime(&time), "%X");
+	if(g_ActiveConfig.bShowOSDClock)
+	{
+		std::stringstream ss;
 
-        final_cyan += ss.str() + "\n";
+		// makes std::put_time use AM/PM depending on the system locale
+		ss.imbue(std::locale(""));
+
+		std::time_t time = std::time(nullptr);
+		ss << std::put_time(std::localtime(&time), "%X");
+
+		final_cyan += ss.str() + "\n";
 		final_yellow += "\n";
-    }
+	}
+
+	{
+		float margin_ms = AudioCommon::g_audio_min_margin_ms.load();
+		if (margin_ms >= 0.0f)
+		{
+			// Round to one decimal place for display
+			float rounded = std::round(margin_ms * 10.0f) / 10.0f;
+			std::ostringstream oss;
+			oss << std::fixed;
+			oss.precision(1);
+			oss << "Audio margin: " << rounded << " ms\n";
+			final_cyan += oss.str();
+			final_yellow += "\n";
+		}
+	}
 
 	// OSD Menu messages
 	if (OSDChoice > 0)

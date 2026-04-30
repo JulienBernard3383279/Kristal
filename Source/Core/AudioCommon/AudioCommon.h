@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 
 #include "AudioCommon/SoundStream.h"
@@ -31,4 +32,10 @@ void StopAudioDump();
 void IncreaseVolume(unsigned short offset);
 void DecreaseVolume(unsigned short offset);
 void ToggleMuteVolume();
+
+// Audio margin display (timer-driven exclusive WASAPI only).
+// Updated from FeedSamplesDirect on every push with the rolling 20-block minimum padding
+// in milliseconds. -1 when the direct path is not active.
+extern std::atomic<float> g_audio_min_margin_ms;
+
 } // namespace AudioCommon

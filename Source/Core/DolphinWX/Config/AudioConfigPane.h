@@ -33,7 +33,7 @@ private:
 	void OnDPL2DecoderCheckBoxChanged(wxCommandEvent&);
 	void OnVolumeSliderChanged(wxCommandEvent&);
 	void OnAudioBackendChanged(wxCommandEvent&);
-	void OnLatencySpinCtrlChanged(wxCommandEvent&);
+	void OnMarginSpinCtrlChanged(wxCommandEvent&);
 	void OnTimeStretchingCheckBoxChanged(wxCommandEvent&);
 	void OnRS_Hack_checkboxChanged(wxCommandEvent&);
 	void OnMixRecordedAudioCheckBoxChanged(wxCommandEvent&);
@@ -53,10 +53,10 @@ private:
 	DolphinSlider* m_volume_slider;
 	wxStaticText* m_volume_text;
 	wxChoice* m_audio_backend_choice;
-	wxSpinCtrl* m_audio_latency_spinctrl;
+	wxSpinCtrl* m_audio_margin_spinctrl;
 	wxCheckBox* m_time_stretching_checkbox;
 	wxCheckBox* m_RS_Hack_checkbox;
-	wxStaticText* m_audio_latency_label;
+	wxStaticText* m_audio_margin_label;
 	wxCheckBox* m_mix_recorded_audio_checkbox;
 	wxChoice *m_audio_recording_device_choice;
 	wxCheckBox* m_mix_looped_back_audio_checkbox;

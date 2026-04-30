@@ -35,6 +35,8 @@ namespace AudioCommon
 static const int AUDIO_VOLUME_MIN = 0;
 static const int AUDIO_VOLUME_MAX = 100;
 
+std::atomic<float> g_audio_min_margin_ms{-1.0f};
+
 void InitSoundStream(void *hWnd)
 {
 	std::string backend = SConfig::GetInstance().sBackend;

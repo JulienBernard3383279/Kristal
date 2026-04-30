@@ -49,11 +49,11 @@ void AudioConfigPane::InitializeGUI()
 	m_volume_text = new wxStaticText(this, wxID_ANY, "");
 	m_audio_backend_choice = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, m_audio_backend_strings);
 	m_audio_backend_choice->SetToolTip(_("Changing this will have no effect while the emulator is running."));
-	m_audio_latency_spinctrl =
-	    new wxSpinCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 30);
-	m_audio_latency_spinctrl->SetToolTip(_("Sets the latency (in ms). Higher values may reduce audio "
-	                                       "crackling. Certain backends only."));
-	m_audio_latency_label = new wxStaticText(this, wxID_ANY, _("Latency:"));
+	m_audio_margin_spinctrl =
+		new wxSpinCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 1, 30);
+	m_audio_margin_spinctrl->SetToolTip(_("Sets the target audio buffer margin (in ms). Higher values "
+										  "may reduce audio crackling. Certain backends only."));
+	m_audio_margin_label = new wxStaticText(this, wxID_ANY, _("Margin (ms):"));
 
 	m_mix_recorded_audio_checkbox = new wxCheckBox(this, wxID_ANY, _("Pass-through audio from recording device"));
 	m_mix_recorded_audio_checkbox->SetToolTip(_("Mixes in audio from an audio input device. "
@@ -111,8 +111,8 @@ void AudioConfigPane::InitializeGUI()
 	                        wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_audio_backend_choice, wxGBPosition(0, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 	backend_grid_sizer->Add(m_dpl2_decoder_checkbox, wxGBPosition(1, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
-	backend_grid_sizer->Add(m_audio_latency_label, wxGBPosition(2, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
-	backend_grid_sizer->Add(m_audio_latency_spinctrl, wxGBPosition(2, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(m_audio_margin_label, wxGBPosition(2, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
+	backend_grid_sizer->Add(m_audio_margin_spinctrl, wxGBPosition(2, 1), wxDefaultSpan, wxALIGN_CENTER_VERTICAL);
 
 
 	backend_grid_sizer->Add(m_mix_recorded_audio_checkbox, wxGBPosition(3, 0), wxGBSpan(1, 2), wxALIGN_CENTER_VERTICAL);
@@ -163,7 +163,7 @@ void AudioConfigPane::LoadGUIValues()
 	m_volume_slider->SetValue(SConfig::GetInstance().m_Volume);
 	m_volume_text->SetLabel(wxString::Format("%d %%", SConfig::GetInstance().m_Volume));
 	m_dpl2_decoder_checkbox->SetValue(startup_params.bDPL2Decoder);
-	m_audio_latency_spinctrl->SetValue(startup_params.iLatency);
+	m_audio_margin_spinctrl->SetValue(startup_params.iMargin);
 
 	m_time_stretching_checkbox->SetValue(startup_params.bTimeStretching);
 	m_RS_Hack_checkbox->SetValue(startup_params.bRSHACK);
@@ -183,8 +183,8 @@ void AudioConfigPane::ToggleBackendSpecificControls(const std::string &backend)
 	m_dpl2_decoder_checkbox->Enable(AudioCommon::SupportsDPL2Decoder(backend));
 
 	bool supports_latency_control = AudioCommon::SupportsLatencyControl(backend);
-	m_audio_latency_spinctrl->Enable(supports_latency_control);
-	m_audio_latency_label->Enable(supports_latency_control);
+	m_audio_margin_spinctrl->Enable(supports_latency_control);
+	m_audio_margin_label->Enable(supports_latency_control);
 
 	bool supports_volume_changes = AudioCommon::SupportsVolumeChanges(backend);
 	m_volume_slider->Enable(supports_volume_changes);
@@ -213,8 +213,8 @@ void AudioConfigPane::BindEvents()
 	m_audio_backend_choice->Bind(wxEVT_CHOICE, &AudioConfigPane::OnAudioBackendChanged, this);
 	m_audio_backend_choice->Bind(wxEVT_UPDATE_UI, &WxEventUtils::OnEnableIfCoreNotRunning);
 
-	m_audio_latency_spinctrl->Bind(wxEVT_SPINCTRL, &AudioConfigPane::OnLatencySpinCtrlChanged, this);
-	m_audio_latency_spinctrl->Bind(wxEVT_UPDATE_UI, &WxEventUtils::OnEnableIfCoreNotRunning);
+	m_audio_margin_spinctrl->Bind(wxEVT_SPINCTRL, &AudioConfigPane::OnMarginSpinCtrlChanged, this);
+	m_audio_margin_spinctrl->Bind(wxEVT_UPDATE_UI, &WxEventUtils::OnEnableIfCoreNotRunning);
 
 	m_time_stretching_checkbox->Bind(wxEVT_CHECKBOX, &AudioConfigPane::OnTimeStretchingCheckBoxChanged, this);
 	m_RS_Hack_checkbox->Bind(wxEVT_CHECKBOX, &AudioConfigPane::OnRS_Hack_checkboxChanged, this);
@@ -279,9 +279,9 @@ void AudioConfigPane::OnAudioBackendChanged(wxCommandEvent &event)
 	AudioCommon::UpdateSoundStream();
 }
 
-void AudioConfigPane::OnLatencySpinCtrlChanged(wxCommandEvent &event)
+void AudioConfigPane::OnMarginSpinCtrlChanged(wxCommandEvent &event)
 {
-	SConfig::GetInstance().iLatency = m_audio_latency_spinctrl->GetValue();
+	SConfig::GetInstance().iMargin = m_audio_margin_spinctrl->GetValue();
 }
 
 

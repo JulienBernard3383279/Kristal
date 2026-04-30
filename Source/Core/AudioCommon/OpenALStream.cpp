@@ -112,7 +112,7 @@ void OpenALStream::InitializeSoundLoop()
 #endif
 	samplesize = surroundsupported ? SOUND_SAMPLES_SURROUND : SOUND_SAMPLES_STEREO;
 	ulFrequency = m_mixer->GetSampleRate();
-	numBuffers = SConfig::GetInstance().iLatency + SOUND_BUFFER_COUNT; // OpenAL requires a minimum of two buffers
+	numBuffers = SConfig::GetInstance().iMargin + SOUND_BUFFER_COUNT; // OpenAL requires a minimum of two buffers
 
 	memset(uiBuffers, 0, numBuffers * sizeof(ALuint));
 	uiSource = 0;
