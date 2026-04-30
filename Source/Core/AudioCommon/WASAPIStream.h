@@ -41,8 +41,9 @@ public:
 	IAudioClient* m_capture_audio_client = nullptr;
 	IAudioCaptureClient* m_capture_client = nullptr;
 	std::string m_selected_device;
-	IMMDevice *m_mm_device = nullptr; // Long lived device COM object for output device used, used to switch volume back on Stop
 
+	// Long lived device COM object for output device used, used to switch volume back on Stop
+	IMMDevice *m_mm_device = nullptr;
 
 	HANDLE m_need_data_event = nullptr;
 

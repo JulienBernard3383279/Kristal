@@ -697,6 +697,71 @@ void WASAPIStream::SoundLoop()
 	}
 }
 
+
+// Poll until the given endpoint can be opened in shared mode, or timeout.
+// Probes by activating an IAudioClient and calling GetMixFormat: this exercises
+// the same kernel path that fails with AUDCLNT_E_DEVICE_IN_USE while an exclusive
+// stream still holds the endpoint. We never call Initialize(), so we never claim it.
+static bool WaitUntilEndpointReady(LPCWSTR endpointId, DWORD timeoutMs = 2000, DWORD pollIntervalMs = 50)
+{
+	IMMDeviceEnumerator *enumerator = nullptr;
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+	                              reinterpret_cast<void **>(&enumerator));
+	if (FAILED(hr) || !enumerator)
+	{
+		ERROR_LOG(AUDIO, "WaitUntilEndpointReady: CoCreateInstance(MMDeviceEnumerator) failed");
+		return false;
+	}
+
+	IMMDevice *device = nullptr;
+	hr = enumerator->GetDevice(endpointId, &device);
+	enumerator->Release();
+	if (FAILED(hr) || !device)
+	{
+		ERROR_LOG(AUDIO, "WaitUntilEndpointReady: GetDevice failed");
+		return false;
+	}
+
+	const DWORD deadline = GetTickCount() + timeoutMs;
+	bool ready = false;
+	DWORD attempts = 0;
+
+	while (true)
+	{
+		IAudioClient *client = nullptr;
+		hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void **>(&client));
+		if (SUCCEEDED(hr) && client)
+		{
+			WAVEFORMATEX *mixFmt = nullptr;
+			HRESULT mixHr = client->GetMixFormat(&mixFmt);
+			client->Release();
+			if (mixFmt)
+				CoTaskMemFree(mixFmt);
+
+			if (SUCCEEDED(mixHr))
+			{
+				ready = true;
+				break;
+			}
+		}
+
+		++attempts;
+		if (GetTickCount() >= deadline)
+			break;
+
+		Sleep(pollIntervalMs);
+	}
+
+	device->Release();
+
+	if (ready)
+		INFO_LOG(AUDIO, "WaitUntilEndpointReady: Endpoint ready after %lu poll(s).", attempts);
+	else
+		WARN_LOG(AUDIO, "WaitUntilEndpointReady: Endpoint did not become ready within %lu ms timeout.", timeoutMs);
+
+	return ready;
+}
+
 void WASAPIStream::Stop()
 {
 	SoundStream::Stop(); // This should signal threadData to false and join the SoundLoop thread
@@ -715,17 +780,28 @@ void WASAPIStream::Stop()
 		m_capture_audio_client->Stop();
 	}
 
-	if (SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
-	{
-		RestoreVolumeIfNeeded();
-		RestoreDefaultAudioOutputDevice();
-	}
-
+	// Release the exclusive stream and all audio resources BEFORE restoring the default
+	// endpoint, so that the endpoint is no longer held when other applications try to
+	// re-open their streams on it.
 	SAFE_RELEASE(m_renderer);
 	SAFE_RELEASE(m_capture_client);
 	SAFE_RELEASE(m_audio_client);
 	SAFE_RELEASE(m_capture_audio_client);
 	SAFE_RELEASE(m_mm_device);
+
+	if (m_exclusive_mode && SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
+	{
+		// Wait until the original endpoint is no longer held exclusively before
+		// switching the system default back to it. Without this wait, applications
+		// that resume on the restored endpoint immediately after the switch may fail
+		// to open their streams because the kernel hasn't yet recorded the exclusive
+		// stream's release.
+		if (!m_default_audio_device_id_prior_to_switch.empty())
+			WaitUntilEndpointReady(m_default_audio_device_id_prior_to_switch.c_str());
+
+		RestoreVolumeIfNeeded();
+		RestoreDefaultAudioOutputDevice();
+	}
 }
 
 std::string lwpstrToString(LPCWSTR wstr)
