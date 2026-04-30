@@ -3560,16 +3560,18 @@ void CEXISlippi::DMARead(u32 addr, u32 size)
 void CEXISlippi::ConfigureJukebox()
 {
 #ifndef IS_PLAYBACK
-	// Exclusive WASAPI and the Jukebox do not play nicely, so we just don't bother enabling
-	// the Jukebox in that scenario - why bother doing the processing work when it's not even
-	// possible to play it?
 	// Jukebox will also respect no audio output
 	std::string backend = SConfig::GetInstance().sBackend;
-	if (backend.find(BACKEND_EXCLUSIVE_WASAPI) != std::string::npos ||
-	    backend.find(BACKEND_NULLSOUND) != std::string::npos)
-	{
+	if (backend.find(BACKEND_NULLSOUND) != std::string::npos)
 		return;
-	}
+
+	// In exclusive WASAPI mode, the jukebox can still be useful if loopback mix-in is enabled:
+	// the device switch will have already redirected the system default endpoint to the loopback
+	// endpoint before this is called, so the jukebox opens there and gets captured automatically.
+	bool isExclusiveWasapi = backend.find(BACKEND_EXCLUSIVE_WASAPI) != std::string::npos;
+	bool mixInEnabled = SConfig::GetInstance().m_mixLoopedBackAudioIn || SConfig::GetInstance().m_mixRecordedAudioIn;
+	if (isExclusiveWasapi && !mixInEnabled)
+		return;
 
 	bool jukeboxEnabled = SConfig::GetInstance().bSlippiJukeboxEnabled;
 	int systemVolume = SConfig::GetInstance().m_IsMuted ? 0 : SConfig::GetInstance().m_Volume;
