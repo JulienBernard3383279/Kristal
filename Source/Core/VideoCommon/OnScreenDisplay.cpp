@@ -85,6 +85,8 @@ static std::multimap<CallbackType, Callback> s_callbacks;
 static std::multimap<MessageType, Message> s_messages;
 static std::mutex s_messages_mutex;
 
+int g_permanent_osd_lines = 0;
+
 void AddTypedMessage(MessageType type, const std::string& message, u32 ms, u32 rgba)
 {
 	std::lock_guard<std::mutex> lock(s_messages_mutex);
@@ -116,8 +118,11 @@ void DrawMessages()
 		std::lock_guard<std::mutex> lock(s_messages_mutex);
 
 		u32 now = Common::Timer::GetTimeMs();
-		int left = 20, top = 35 + (g_ActiveConfig.bShowOSDClock ? ((g_ActiveConfig.backend_info.APIType & API_D3D9) ||
-			(g_ActiveConfig.backend_info.APIType & API_D3D11) ? 35 : 15) : 0);
+		// Permanent debug lines start at pixel row 20 and each advances 20px (font size passed
+		// to DrawTextScaled is 20.0f, which equals 20 pixels per line at 1:1 scale).
+		// Start the temporary messages immediately below the last permanent line.
+		int left = 20;
+		int top = 20 + g_permanent_osd_lines * 20;
 
 		auto it = s_messages.begin();
 		while (it != s_messages.end())
@@ -130,7 +135,7 @@ void DrawMessages()
 				it = s_messages.erase(it);
 			else
 				++it;
-			top += 15;
+			top += 20;
 		}
 	}
 }

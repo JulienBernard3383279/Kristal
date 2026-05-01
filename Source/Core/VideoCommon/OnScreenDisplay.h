@@ -61,6 +61,10 @@ void DrawMessages(); // draw the current messages on the screen. Only call once
                      // per frame.
 void ClearMessages();
 
+// Set by DrawDebugText each frame to the number of permanent debug lines rendered,
+// so DrawMessages can start below them without overlapping.
+extern int g_permanent_osd_lines;
+
 // On-screen callbacks
 enum class CallbackType
 {

@@ -524,6 +524,9 @@ void Renderer::DrawDebugText()
 #endif
 	
 	// and then the text
+	// Count permanent lines so DrawMessages can start below them without overlapping.
+	OSD::g_permanent_osd_lines = static_cast<int>(std::count(final_cyan.begin(), final_cyan.end(), '\n'));
+
 	RenderText(final_cyan, 20, 20, 0xFF00FFFF);
 	RenderText(final_yellow, 20, 20, 0xFFFFFF00);
 
