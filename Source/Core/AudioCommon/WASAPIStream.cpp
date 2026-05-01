@@ -24,10 +24,8 @@
 // Ensure volume control works in both modes
 // Ensure change of output device works in shared mode (see Windows SDK samples linked in
 // https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)
-// Handle Slippi jukebox
 
-//TODO 2026: Use exclusive timer-driven, bypass the Dolphin mixer entirely,
-// feed the audio coming from the game directly to the WASAPI buffer
+
 #define SAFE_RELEASE(p)                                                                                                \
 	{                                                                                                                  \
 		if ((p))                                                                                                       \
@@ -839,14 +837,16 @@ void WASAPIStream::FeedSamplesDirect(const s16 *samples, u32 num_samples, u32 in
 
 		std::memcpy(data, &out_buf[written * 2], to_write * 2 * sizeof(s16));
 
-		// Apply volume and mix in captured audio in-place on the freshly-written region.
 		s16 *s16_data = reinterpret_cast<s16 *>(data);
-		if (m_audioCaptureType != AudioCaptureType::None)
-			CaptureAudioAndMix(s16_data, to_write);
 
+		// Apply Dolphin volume to game samples first, before mixing in capture.
+		// Pass-through audio is intentionally not subject to the Dolphin volume slider.
 		float volume = SConfig::GetInstance().m_IsMuted ? 0.0f : SConfig::GetInstance().m_Volume / 100.0f;
 		for (u32 i = 0; i < to_write * 2; ++i)
 			s16_data[i] = static_cast<s16>(s16_data[i] * volume);
+
+		if (m_audioCaptureType != AudioCaptureType::None)
+			CaptureAudioAndMix(s16_data, to_write);
 
 		DWORD flags = (Core::GetState() != Core::CORE_RUN) ? AUDCLNT_BUFFERFLAGS_SILENT : 0;
 		m_renderer->ReleaseBuffer(to_write, flags);
@@ -952,6 +952,11 @@ void WASAPIStream::Stop()
 		m_capture_audio_client->Stop();
 	}
 
+	// Restore the exclusive endpoint's volume boost now, while m_mm_device is still valid.
+	// This must happen before SAFE_RELEASE(m_mm_device) below.
+	if (m_exclusive_mode && SConfig::GetInstance().m_SwitchDefaultAudioOutputDeviceDuringGameplay)
+		RestoreVolumeIfNeeded();
+
 	// Release the exclusive stream and all audio resources BEFORE restoring the default
 	// endpoint, so that the endpoint is no longer held when other applications try to
 	// re-open their streams on it. Hold the direct-path mutex while releasing m_audio_client
@@ -975,7 +980,6 @@ void WASAPIStream::Stop()
 		if (!m_default_audio_device_id_prior_to_switch.empty())
 			WaitUntilEndpointReady(m_default_audio_device_id_prior_to_switch.c_str());
 
-		RestoreVolumeIfNeeded();
 		RestoreDefaultAudioOutputDevice();
 	}
 }
