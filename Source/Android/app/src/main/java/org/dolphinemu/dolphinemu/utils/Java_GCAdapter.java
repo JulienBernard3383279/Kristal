@@ -33,7 +33,7 @@ public class Java_GCAdapter {
 		for (Map.Entry<String, UsbDevice> pair : devices.entrySet())
 		{
 			UsbDevice dev = pair.getValue();
-			if (dev.getProductId() == 0x0337 && dev.getVendorId() == 0x057e)
+			if ((dev.getProductId() == 0x0337 && dev.getVendorId() == 0x057e) || (dev.getProductId() == 0x1846 && dev.getVendorId() == 0x0079))
 			{
 				if (!manager.hasPermission(dev))
 				{
@@ -59,7 +59,7 @@ public class Java_GCAdapter {
 		for (Map.Entry<String, UsbDevice> pair : devices.entrySet())
 		{
 			UsbDevice dev = pair.getValue();
-			if (dev.getProductId() == 0x0337 && dev.getVendorId() == 0x057e)
+			if ((dev.getProductId() == 0x0337 && dev.getVendorId() == 0x057e) || (dev.getProductId() == 0x1846 && dev.getVendorId() == 0x0079))
 			{
 				if (manager.hasPermission(dev))
 					return true;
@@ -90,7 +90,7 @@ public class Java_GCAdapter {
 		for (Map.Entry<String, UsbDevice> pair : devices.entrySet())
 		{
 			UsbDevice dev = pair.getValue();
-			if (dev.getProductId() == 0x0337 && dev.getVendorId() == 0x057e)
+			if ((dev.getProductId() == 0x0337 && dev.getVendorId() == 0x057e) || (dev.getProductId() == 0x1846 && dev.getVendorId() == 0x0079))
 			{
 				if (manager.hasPermission(dev))
 				{
